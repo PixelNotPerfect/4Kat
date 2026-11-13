@@ -1058,10 +1058,225 @@ function updateShooting(dt) {
 function updateProps(dt, t) { B.update(dt, t); V.update(dt, t); Y.update(dt, t); F.update(dt, t); updateShooting(dt); updateEmotes(dt, t); }
 
 /* ==========================================================================
-   10. SON (remplacé plus bas par le vrai moteur audio)
+   10. SON : musique générative, ambiance et bruitages
    ========================================================================== */
-const sfx = new Proxy({}, { get: () => () => {} });
-const music = { energy: 0.3, night: 0, motif() {} };
+/* Tout le son est synthétisé avec l'API Web Audio : oscillateurs, bruit
+   filtré, enveloppes. Rien n'est chargé. Le contexte audio n'est créé
+   qu'au premier clic, comme l'exigent les navigateurs. */
+
+/** Réglages musicaux que le récit fait évoluer. */
+const music = {
+  energy: 0.3,    // 0 = quelques notes éparses, 1 = la course-poursuite
+  night: 0,       // 1 = tempo ralenti, notes plus graves, grillons
+  queue: [],      // notes imposées (la petite berceuse du début et de la fin)
+  motif() { this.queue = [78, 0, 81, 0, 83, 0, 0, 81, 78, 0, 76, 0, 74, 0, 0, 0, 69, 0, 74, 0, 0, 0]; },
+};
+
+const audio = (() => {
+  let ctx = null, master, musicBus, sfxBus, reverb, echo, noiseBuf, windGain, windFilter, purrGain;
+  let muted = false, purring = false, nextStep = 0, stepIndex = 0, degree = 4, nextChirp = 0;
+  const now = () => ctx.currentTime;
+  const mtof = m => 440 * Math.pow(2, (m - 69) / 12);
+  const gainNode = (v, dest) => { const g = ctx.createGain(); g.gain.value = v; if (dest) g.connect(dest); return g; };
+
+  /* --- Briques de synthèse --- */
+  /** Enveloppe percussive : attaque `a`, puis extinction exponentielle `d`. */
+  function envelope(g, t, a, peak, d) {
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(Math.max(peak, 0.0002), t + a);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + a + d);
+  }
+  /** Une note d'oscillateur, avec glissando facultatif de f vers f2. */
+  function tone({ type = 'sine', f, f2, t = now(), a = 0.005, d = 0.3, gain = 0.2, dest = sfxBus, vibrato = 0 }) {
+    const o = ctx.createOscillator(), g = gainNode(0, dest);
+    o.type = type; o.frequency.setValueAtTime(f, t);
+    if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + a + d);
+    if (vibrato) { const l = ctx.createOscillator(), lg = gainNode(vibrato, o.frequency); l.frequency.value = 6.5; l.connect(lg); l.start(t); l.stop(t + a + d + 0.1); }
+    envelope(g, t, a, gain, d);
+    o.connect(g); o.start(t); o.stop(t + a + d + 0.1);
+    return g;
+  }
+  /** Une bouffée de bruit filtré (souffles, chocs, frottements). */
+  function noise({ type = 'bandpass', f = 1000, f2, q = 1, t = now(), a = 0.005, d = 0.2, gain = 0.2, dest = sfxBus }) {
+    const src = ctx.createBufferSource(), filter = ctx.createBiquadFilter(), g = gainNode(0, dest);
+    src.buffer = noiseBuf; src.loop = true;
+    filter.type = type; filter.Q.value = q; filter.frequency.setValueAtTime(f, t);
+    if (f2) filter.frequency.exponentialRampToValueAtTime(f2, t + a + d);
+    envelope(g, t, a, gain, d);
+    src.connect(filter); filter.connect(g);
+    src.start(t, Math.random() * 1.5); src.stop(t + a + d + 0.1);
+  }
+
+  /* --- Musique générative : nappe, basse, et un kalimba qui se promène --- */
+  const SCALE = [62, 64, 66, 69, 71, 74, 76, 78, 81, 83];                 // ré majeur pentatonique
+  const CHORDS = [[50, 57, 66], [47, 54, 62], [43, 50, 59], [45, 52, 61]];   // ré, si mineur, sol, la
+  function pluck(midi, t, gain, decay) {
+    const f = mtof(midi), g = gainNode(1, musicBus);
+    g.connect(echo);
+    tone({ f, t, a: 0.004, d: decay, gain, dest: g });
+    tone({ f: f * 2, t, a: 0.003, d: decay * 0.35, gain: gain * 0.28, dest: g });
+    tone({ f: f * 5.4, t, a: 0.002, d: 0.06, gain: gain * 0.12, dest: g });   // le « tic » de la lame
+  }
+  function pad(chord, t, len) {
+    const filter = ctx.createBiquadFilter(); filter.type = 'lowpass'; filter.frequency.value = lerp(900, 600, music.night);
+    const g = gainNode(0, musicBus); filter.connect(g);
+    g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.05, t + len * 0.4);
+    g.gain.linearRampToValueAtTime(0.0001, t + len * 1.35);
+    for (const m of chord) for (const detune of [-5, 6]) {
+      const o = ctx.createOscillator(); o.type = 'triangle'; o.frequency.value = mtof(m); o.detune.value = detune;
+      o.connect(filter); o.start(t); o.stop(t + len * 1.4);
+    }
+    tone({ f: mtof(chord[0] - 12), t, a: 0.08, d: len * 0.9, gain: 0.11, dest: musicBus });   // basse
+  }
+  function playStep(i, t) {
+    const beat = i % 8, chord = CHORDS[Math.floor(i / 8) % 4], e = music.energy;
+    if (beat === 0) pad(chord, t, (nextStepDur()) * 8);
+    if (music.queue.length) {                       // la berceuse a la priorité
+      const m = music.queue.shift(); if (m) pluck(m, t, 0.17, 2.4);
+      return;
+    }
+    if (beat === 0 || Math.random() < 0.15 + e * 0.6) {
+      degree += [-2, -1, -1, 1, 1, 2][Math.floor(Math.random() * 6)];
+      if (degree < 0) degree = 1; if (degree > SCALE.length - 1) degree = SCALE.length - 2;
+      pluck(SCALE[degree] - (music.night > 0.5 && degree > 5 ? 12 : 0), t, 0.06 + 0.07 * e, lerp(1.4, 2.2, music.night));
+    }
+    if (e > 0.8) {                                  // la poursuite : un petit moteur rythmique
+      noise({ type: 'highpass', f: 6500, t, a: 0.002, d: 0.035, gain: beat % 2 ? 0.012 : 0.03, dest: musicBus });
+      if (beat % 4 === 0) tone({ f: mtof(chord[0]), f2: mtof(chord[0]) * 0.98, t, a: 0.004, d: 0.22, gain: 0.16, dest: musicBus });
+    }
+  }
+  const nextStepDur = () => lerp(lerp(0.31, 0.24, smooth(0.7, 1, music.energy)), 0.4, music.night);
+
+  /** Appelée régulièrement : programme les notes un peu en avance et fait vivre l'ambiance. */
+  function schedule() {
+    if (!ctx || ctx.state !== 'running') return;
+    const t = now();
+    if (nextStep < t) nextStep = t + 0.05;
+    while (nextStep < t + 0.3) { playStep(stepIndex++, nextStep); nextStep += nextStepDur(); }
+    // Vent : son volume et sa couleur respirent lentement.
+    windGain.gain.setTargetAtTime(0.022 + 0.02 * (0.5 + 0.5 * Math.sin(t * 0.21)) + 0.02 * music.night, t, 1.2);
+    windFilter.frequency.setTargetAtTime(380 + 220 * Math.sin(t * 0.13), t, 1.5);
+    // Ronron : il suit la respiration.
+    purrGain.gain.setTargetAtTime(purring ? 0.5 + 0.3 * Math.sin(t * 2.7) : 0, t, purring ? 0.15 : 0.5);
+    // Grillons, la nuit venue.
+    if (music.night > 0.4 && t > nextChirp) {
+      const f = 4100 + Math.random() * 500;
+      for (let k = 0; k < 3; k++) tone({ f, t: t + k * 0.055, a: 0.004, d: 0.03, gain: 0.01 });
+      nextChirp = t + 0.5 + Math.random() * 1.3;
+    }
+  }
+
+  /* --- Mise en route (au premier clic) --- */
+  function start() {
+    if (ctx) { ctx.resume(); return; }
+    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+    ctx = new AC();
+    master = gainNode(muted ? 0 : 0.9);
+    const comp = ctx.createDynamicsCompressor(); master.connect(comp); comp.connect(ctx.destination);
+
+    // Bruit blanc, matière première de tous les souffles.
+    noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+    const nd = noiseBuf.getChannelData(0); for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+
+    // Réverbération : une réponse impulsionnelle fabriquée (bruit qui s'éteint).
+    const len = Math.floor(ctx.sampleRate * 2.8), ir = ctx.createBuffer(2, len, ctx.sampleRate);
+    for (let c = 0; c < 2; c++) { const d = ir.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.6); }
+    reverb = ctx.createConvolver(); reverb.buffer = ir; reverb.connect(gainNode(0.45, master));
+
+    // Écho doux pour le kalimba.
+    echo = gainNode(0.3);
+    const delay = ctx.createDelay(1.5), feedback = gainNode(0.3), damping = ctx.createBiquadFilter();
+    delay.delayTime.value = 0.42; damping.type = 'lowpass'; damping.frequency.value = 2200;
+    echo.connect(delay); delay.connect(damping); damping.connect(feedback); feedback.connect(delay);
+    damping.connect(master); damping.connect(reverb);
+
+    musicBus = gainNode(0.95, master); musicBus.connect(gainNode(0.5, reverb));
+    sfxBus = gainNode(0.9, master); sfxBus.connect(gainNode(0.22, reverb));
+
+    // Vent : un bruit filtré qui tourne en boucle.
+    const wind = ctx.createBufferSource(); wind.buffer = noiseBuf; wind.loop = true;
+    windFilter = ctx.createBiquadFilter(); windFilter.type = 'bandpass'; windFilter.frequency.value = 420; windFilter.Q.value = 0.6;
+    windGain = gainNode(0, master); wind.connect(windFilter); windFilter.connect(windGain); wind.start();
+
+    // Ronron : un grondement grave haché une vingtaine de fois par seconde.
+    const purr = ctx.createBufferSource(); purr.buffer = noiseBuf; purr.loop = true;
+    const purrFilter = ctx.createBiquadFilter(); purrFilter.type = 'lowpass'; purrFilter.frequency.value = 230;
+    const chop = gainNode(0.5), lfo = ctx.createOscillator(); lfo.type = 'sawtooth'; lfo.frequency.value = 23;
+    lfo.connect(gainNode(0.5, chop.gain));
+    purrGain = gainNode(0, master);
+    purr.connect(purrFilter); purrFilter.connect(chop); chop.connect(purrGain); purr.start(); lfo.start();
+
+    setInterval(schedule, 60);
+  }
+
+  /* --- Bruitages --- */
+  const fx = {
+    step: run => noise({ f: 650, q: 0.8, a: 0.002, d: 0.045, gain: 0.03 + 0.03 * run }),
+    meow(p = 1) {
+      const t = now(), d = 0.44, o = ctx.createOscillator(), g = gainNode(0, sfxBus);
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(620 * p, t); o.frequency.linearRampToValueAtTime(990 * p, t + d * 0.3);
+      o.frequency.exponentialRampToValueAtTime(560 * p, t + d);
+      const lfo = ctx.createOscillator(); lfo.frequency.value = 7; lfo.connect(gainNode(14, o.frequency)); lfo.start(t); lfo.stop(t + d + 0.1);
+      // Deux formants mobiles : c'est eux qui articulent « mi-a-ou ».
+      const f1 = ctx.createBiquadFilter(), f2 = ctx.createBiquadFilter();
+      f1.type = f2.type = 'bandpass'; f1.Q.value = 4; f2.Q.value = 7; f2.frequency.value = 3000;
+      f1.frequency.setValueAtTime(900, t); f1.frequency.linearRampToValueAtTime(1900, t + d * 0.35); f1.frequency.linearRampToValueAtTime(950, t + d);
+      o.connect(f1); o.connect(f2); f1.connect(g); f2.connect(gainNode(0.4, g));
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.32, t + 0.05);
+      g.gain.linearRampToValueAtTime(0.22, t + d * 0.6); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+      o.start(t); o.stop(t + d + 0.05);
+    },
+    yawn() { tone({ type: 'triangle', f: 540, f2: 250, a: 0.3, d: 0.9, gain: 0.06, vibrato: 5 }); noise({ type: 'lowpass', f: 1100, f2: 500, a: 0.35, d: 0.8, gain: 0.035 }); },
+    swish: () => noise({ f: 1200, f2: 3200, q: 1.5, a: 0.02, d: 0.14, gain: 0.12 }),
+    whoosh: () => noise({ f: 380, f2: 2200, q: 1.2, a: 0.14, d: 0.3, gain: 0.2 }),
+    thud() { tone({ f: 130, f2: 45, a: 0.003, d: 0.2, gain: 0.5 }); noise({ type: 'lowpass', f: 420, a: 0.002, d: 0.08, gain: 0.22 }); },
+    boing() {   // ressort de dessin animé : une hauteur qui tremble en s'amortissant
+      const t = now(), o = ctx.createOscillator(), g = gainNode(0, sfxBus), curve = new Float32Array(64);
+      for (let i = 0; i < 64; i++) { const x = i / 63 * 0.6; curve[i] = 300 + 170 * Math.exp(-5 * x) * Math.sin(TAU * 11 * x); }
+      o.type = 'triangle'; o.frequency.setValueCurveAtTime(curve, t, 0.6);
+      envelope(g, t, 0.005, 0.13, 0.6); o.connect(g); o.start(t); o.stop(t + 0.7);
+    },
+    wiggle() { for (let i = 0; i < 9; i++) noise({ type: 'highpass', f: 5200, t: now() + i * 0.14, a: 0.002, d: 0.03, gain: 0.05 }); },
+    sneezeIn() { noise({ f: 800, f2: 2600, q: 2, a: 0.6, d: 0.1, gain: 0.05 }); tone({ f: 700, f2: 1150, a: 0.55, d: 0.1, gain: 0.03 }); },
+    sneezeOut() { noise({ type: 'highpass', f: 2200, a: 0.004, d: 0.2, gain: 0.4 }); tone({ f: 1500, f2: 700, a: 0.005, d: 0.15, gain: 0.1 }); },
+    tink(v = 1) { [[2100, 0.35, 0.1], [3150, 0.25, 0.06], [4700, 0.15, 0.03]].forEach(([f, d, g]) => tone({ f, a: 0.002, d, gain: g * v })); },
+    scrape: d => noise({ f: 2600, q: 4, a: 0.1, d, gain: 0.05 }),
+    crash() {
+      const t = now();
+      noise({ type: 'highpass', f: 1800, a: 0.002, d: 0.5, gain: 0.45 }); noise({ f: 900, a: 0.002, d: 0.2, gain: 0.3 });
+      for (let i = 0; i < 9; i++) tone({ f: 1500 + Math.random() * 4500, t: t + Math.random() * 0.4, a: 0.002, d: 0.12 + Math.random() * 0.25, gain: 0.06 });
+      fx.thud();
+    },
+    whistle() {   // un petit air innocent
+      let t = now() + 0.1;
+      for (const [m, d] of [[88, 0.2], [91, 0.2], [88, 0.2], [84, 0.38], [86, 0.2], [88, 0.2], [91, 0.5]]) {
+        tone({ f: mtof(m), t, a: 0.03, d: d * 0.9, gain: 0.06, vibrato: 9 });
+        noise({ f: mtof(m), q: 14, t, a: 0.03, d: d * 0.9, gain: 0.04 });
+        t += d + 0.03;
+      }
+    },
+    pat() { tone({ f: 300, f2: 170, a: 0.003, d: 0.08, gain: 0.2 }); noise({ type: 'lowpass', f: 800, a: 0.002, d: 0.05, gain: 0.1 }); },
+    pop: (p = 1) => tone({ f: 520 * p, f2: 1040 * p, a: 0.005, d: 0.1, gain: 0.07 }),
+    sparkle() { [91, 95, 98, 103].forEach((m, i) => { const g = tone({ f: mtof(m), t: now() + i * 0.07, a: 0.003, d: 0.9, gain: 0.045 }); g.connect(echo); }); },
+    purr(on) { purring = on; },
+  };
+  /* Les bruitages demandés avant le premier clic sont simplement ignorés. */
+  const sfx = new Proxy({}, { get: (_, name) => (...args) => { if (name === 'purr') purring = !!args[0]; else if (ctx && ctx.state === 'running' && fx[name]) fx[name](...args); } });
+
+  const setMuted = m => { muted = m; if (ctx) master.gain.setTargetAtTime(m ? 0 : 0.9, now(), 0.05); };
+  return { start, sfx, setMuted, get muted() { return muted; }, get ctx() { return ctx; }, get master() { return master; } };
+})();
+const sfx = audio.sfx;
+K.onStep = run => sfx.step(run);
+
+/* Bouton (et touche M) pour couper ou remettre le son. */
+const muteEl = document.getElementById('mute');
+function toggleMute() { audio.setMuted(!audio.muted); muteEl.textContent = audio.muted ? 'son : non' : 'son : oui'; }
+muteEl.addEventListener('click', toggleMute);
+window.addEventListener('keydown', e => { if (e.key === 'm' || e.key === 'M') toggleMute(); });
+/* On suspend le son quand l'onglet n'est plus visible. */
+document.addEventListener('visibilitychange', () => { if (audio.ctx) document.hidden ? audio.ctx.suspend() : audio.ctx.resume(); });
 
 /* ==========================================================================
    11. LE RÉCIT
@@ -1388,6 +1603,7 @@ let started = false;
 function start() {
   if (started) return; started = true;
   introEl.classList.add('off');
+  audio.start();
   script = story(START_SCENE); script.next();
 }
 introEl.addEventListener('click', start);
@@ -1397,12 +1613,13 @@ const clock = new THREE.Clock();
 updateCamera(0, 0, true);
 renderer.setAnimationLoop(() => {
   // dt borné : un onglet resté en arrière-plan ne provoque pas de saut.
-  step(Math.min(clock.getDelta(), 0.05) * SPEED);
+  const dt = Math.min(clock.getDelta(), 0.05) * SPEED;
+  if (!window.__debug.manual) step(dt);
   renderer.render(scene, camera);
 });
 
 /* Petit accès de mise au point (console) : avancer le temps sans attendre. */
-window.__debug = { step, start, world, cam, camGoal, K, render: () => renderer.render(scene, camera) };
+window.__debug = { manual: false, step, start, audio, music, world, cam, camGoal, K, render: () => renderer.render(scene, camera) };
 </script>
 <script>
   /* Si le module n'a pas pu se charger (pas de réseau), on l'explique. */
