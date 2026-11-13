@@ -15,7 +15,7 @@
     (corail : papillon et cœurs ; or : lucioles).
 
   Paramètres d'URL facultatifs (pratiques pour régler une scène) :
-    ?scene=2   démarre directement au chapitre indiqué (1 à 5)
+    ?scene=2   démarre directement à la scène indiquée (1 à 5)
     ?speed=3   multiplie la vitesse du récit
 -->
 <style>
@@ -44,15 +44,6 @@
      aussi bien sur le blanc de l'aube que sur le noir de la nuit. */
   .ink { color: #fff; mix-blend-mode: difference; }
 
-  #chapter {
-    position: fixed; left: 50%; bottom: 9vh; transform: translateX(-50%);
-    text-align: center; font-style: italic; letter-spacing: .32em; text-transform: lowercase;
-    font-size: clamp(13px, 1.5vw, 19px); opacity: 0; transition: opacity 1.6s ease;
-    pointer-events: none; white-space: nowrap;
-  }
-  #chapter.on { opacity: .85; }
-  #chapter b { font-weight: normal; font-style: normal; letter-spacing: .5em; margin-right: .6em; }
-
   #intro {
     position: fixed; inset: 0; display: flex; flex-direction: column;
     align-items: center; justify-content: flex-start; padding-top: 13vh;
@@ -77,6 +68,13 @@
   }
   #mute:hover { opacity: 1; }
 
+  #pause {
+    position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); display: none;
+    font-style: italic; letter-spacing: .32em; font-size: clamp(14px, 1.6vw, 20px);
+    pointer-events: none; white-space: nowrap;
+  }
+  #pause.on { display: block; }
+
   #error {
     position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
     padding: 2em; text-align: center; font-style: italic; color: #222; background: #f4f4f1;
@@ -87,13 +85,13 @@
 <canvas id="scene"></canvas>
 <div id="vignette"></div>
 <div id="fade"></div>
-<div id="chapter" class="ink"></div>
 <div id="intro" class="ink">
   <h1>Premiers pas</h1>
   <p>le voyage d'un chaton</p>
   <button id="start">commencer</button>
   <small>avec le son, c'est encore plus doux</small>
 </div>
+<div id="pause" class="ink">pause · espace pour reprendre</div>
 <button id="mute" class="ink" aria-label="Activer ou couper le son">son : oui</button>
 <div id="error">Impossible de charger Three.js. Une connexion internet est nécessaire au premier lancement.</div>
 
@@ -325,6 +323,8 @@ const nearMat = new THREE.MeshBasicMaterial({ color: 0x141416 });    // silhouet
 /* Zones où se jouent les scènes : on n'y plante rien devant la caméra. */
 const STAGES = [[-2.5, 9.5], [13.5, 18.5], [21.5, 26], [40, 48.5], [56.5, 64]];
 const onStage = x => STAGES.some(([a, b]) => x > a && x < b);
+/* Obstacles au sol (disques x, z, rayon) que le chaton contourne. */
+const obstacles = [];
 const tufts = [];
 {
   const blade = new THREE.ConeGeometry(0.022, 1, 5); blade.translate(0, 0.5, 0);
@@ -354,7 +354,7 @@ const tufts = [];
     const crown = new THREE.Mesh(ballGeo, nearMat); crown.scale.set(h * 0.3, h * 0.42, h * 0.3); crown.position.y = h; crown.castShadow = true;
     tree.add(trunk, crown);
     tree.position.set(x, groundHeight(x, z) - 0.05, z);
-    scene.add(tree);
+    scene.add(tree); obstacles.push({ x, z, r: 0.1 });
   }
   // Galets ronds.
   for (let i = 0; i < 26; i++) {
@@ -362,7 +362,7 @@ const tufts = [];
     if (z > 0 && onStage(x)) continue;
     const rock = new THREE.Mesh(ballGeo, nearMat); rock.scale.set(r * 1.4, r * 0.8, r);
     rock.position.set(x, groundHeight(x, z) + r * 0.3, z); rock.castShadow = true;
-    scene.add(rock);
+    scene.add(rock); obstacles.push({ x, z, r: r * 1.3 });
   }
 }
 
@@ -517,7 +517,7 @@ function updateWorld(dt, t) {
    La caméra voit donc son flanc droit (-X local) quand il marche vers +X.
    ========================================================================== */
 
-const LEG = 0.315;   // longueur d'une patte, du pivot de la hanche jusqu'au sol
+const L1 = 0.17, L2 = 0.165;   // longueurs de la cuisse (ou du bras) et de la jambe (ou de l'avant-bras)
 
 function createKitten() {
   /* --- Matières --- */
@@ -542,15 +542,21 @@ function createKitten() {
   const root = new THREE.Group(), tilt = new THREE.Group(), yawG = new THREE.Group(), hips = new THREE.Group();
   root.add(tilt); tilt.add(yawG); yawG.add(hips);
 
-  /* --- Corps : trois volumes qui se fondent --- */
-  const body = blob(hips, fur, 0.2, 0.195, 0.34);
-  blob(hips, fur, 0.192, 0.19, 0.19, 0, 0.012, 0.15);    // poitrail
-  blob(hips, fur, 0.195, 0.188, 0.19, 0, 0, -0.14);        // croupe
+  /* --- Corps : un tronc souple, en deux moitiés articulées au milieu du dos ---
+     L'avant-train porte la tête et les pattes avant, l'arrière-train la queue
+     et les pattes arrière : c'est ce qui permet à l'échine d'onduler au pas
+     et de se ramasser puis se détendre au galop. */
+  const chestG = new THREE.Group(); chestG.position.z = 0.04;
+  const rumpG = new THREE.Group(); rumpG.position.z = -0.04;
+  hips.add(chestG, rumpG);
+  const body = blob(hips, fur, 0.2, 0.195, 0.31);                        // ventre
+  const chest = blob(chestG, fur, 0.192, 0.19, 0.19, 0, 0.012, 0.11);    // poitrail
+  const rump = blob(rumpG, fur, 0.195, 0.188, 0.19, 0, 0, -0.1);         // croupe
 
   /* --- Tête : grosse et ronde, comme chez tous les chatons --- */
-  const neck = new THREE.Group(); neck.position.set(0, 0.17, 0.27); hips.add(neck);
+  const neck = new THREE.Group(); neck.position.set(0, 0.17, 0.23); chestG.add(neck);
   const head = new THREE.Group(); head.rotation.order = 'YXZ'; neck.add(head);
-  blob(head, fur, 0.25, 0.22, 0.225, 0, 0.07, 0.06);     // crâne
+  const skull = blob(head, fur, 0.25, 0.22, 0.225, 0, 0.07, 0.06);     // crâne
   blob(head, fur, 0.1, 0.09, 0.1, 0.14, -0.01, 0.1);     // joues rebondies
   blob(head, fur, 0.1, 0.09, 0.1, -0.14, -0.01, 0.1);
 
@@ -592,26 +598,57 @@ function createKitten() {
     ear.add(outer, inner); head.add(ear); ears.push({ ear, side: s, flick: 0 });
   }
 
-  /* --- Pattes : une capsule et un coussinet, pivot à la hanche --- */
-  const legGeo = new THREE.CapsuleGeometry(0.064, 0.15, 6, 16); legGeo.translate(0, -0.135, 0);
+  /* --- Pattes : deux segments articulés (épaule ou hanche, puis coude ou genou) --- */
+  const upperGeo = new THREE.CapsuleGeometry(0.066, L1 - 0.03, 6, 16); upperGeo.translate(0, -L1 / 2, 0);
+  const lowerGeo = new THREE.CapsuleGeometry(0.055, L2 - 0.03, 6, 16); lowerGeo.translate(0, -L2 / 2, 0);
   const legs = [];
   // Ordre : avant côté caméra, avant côté opposé, arrière côté caméra, arrière côté opposé.
-  for (const [x, z] of [[-0.11, 0.2], [0.11, 0.2], [-0.12, -0.2], [0.12, -0.2]]) {
-    const leg = new THREE.Group(); leg.position.set(x, -0.045, z);
-    const m = new THREE.Mesh(legGeo, fur); m.castShadow = true; leg.add(m);
-    blob(leg, fur, 0.07, 0.046, 0.086, 0, -0.269, 0.026);
-    hips.add(leg); legs.push(leg);
+  [[-0.11, 0.2], [0.11, 0.2], [-0.12, -0.2], [0.12, -0.2]].forEach(([x, z], i) => {
+    const front = i < 2, parentG = front ? chestG : rumpG;
+    const leg = new THREE.Group(); leg.position.set(x, -0.045, z - parentG.position.z);
+    const knee = new THREE.Group(); knee.position.y = -L1;
+    const upper = new THREE.Mesh(upperGeo, fur), lower = new THREE.Mesh(lowerGeo, fur);
+    upper.castShadow = lower.castShadow = true;
+    leg.add(upper, knee); knee.add(lower);
+    blob(knee, fur, 0.07, 0.046, 0.086, 0, -L2 + 0.005, 0.028);          // coussinet
+    parentG.add(leg);
+    legs.push({ leg, knee, front, parentG, pivot: leg.position.clone(), restX: x * 0.85, restZ: z, u: 0 });
+  });
+  /** Cinématique inverse à deux os : plie la patte pour que son extrémité
+      atteigne la cible (tx, ty, tz), exprimée dans le repère de son demi-tronc. */
+  function solveLeg(L, tx, ty, tz) {
+    const dx = tx - L.pivot.x, dy = ty - L.pivot.y, dz = tz - L.pivot.z;
+    const down = Math.hypot(dx, dy);
+    const D = clamp(Math.hypot(down, dz), 0.1, L1 + L2 - 0.004);
+    const alpha = Math.acos(clamp((L1 * L1 + D * D - L2 * L2) / (2 * L1 * D), -1, 1));
+    const gamma = Math.acos(clamp((L1 * L1 + L2 * L2 - D * D) / (2 * L1 * L2), -1, 1));
+    const s = L.front ? 1 : -1;                    // le coude pointe vers l'arrière, le genou vers l'avant
+    L.leg.rotation.set(Math.atan2(-dz, down) + s * alpha, 0, Math.atan2(dx, -dy));
+    L.knee.rotation.x = -s * (PI - gamma);
   }
+  /** Trajectoire d'un pied sur un cycle : appui (il recule sous le corps), puis
+      foulée (il se lève et revient devant). u : 0..1, beta : part du cycle en appui. */
+  function footCycle(u, beta, half, lift, out) {
+    if (u < beta) { out.z = half * (1 - 2 * u / beta); out.y = 0; }
+    else { const k = (u - beta) / (1 - beta); out.z = half * (2 * easeInOut(k) - 1); out.y = Math.sin(k * PI) * lift; }
+  }
+  const WALK = [0.25, 0.75, 0, 0.5];   // pas : arrière, avant du même côté, puis l'autre côté
+  const RUN = [0.5, 0.6, 0, 0.1];      // galop : les deux arrière poussent, les deux avant réceptionnent
+
+  // Ombre de contact : une tache douce qui ancre le chaton au sol.
+  const contact = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: softDot, color: 0x000000, transparent: true, opacity: 0.3, depthWrite: false, fog: false }));
+  contact.rotation.x = -PI / 2; contact.position.y = 0.012; contact.renderOrder = 1;
+  yawG.add(contact);
 
   /* --- Queue : une chaîne d'articulations habillée d'un tube lisse ---
      Les articulations ne portent aucun maillage : à chaque image, on tend
      autour d'elles un tube (anneaux de sommets) terminé par un bout arrondi. */
   const tail = [];
-  let parent = hips;
+  let parent = rumpG;
   const TAIL = 18, RAD = 12, CAP = 4, RINGS = TAIL + CAP;
   for (let i = 0; i < TAIL; i++) {
     const joint = new THREE.Group();
-    joint.position.set(0, i ? 0.033 : 0.09, i ? 0 : -0.3);
+    joint.position.set(0, i ? 0.033 : 0.09, i ? 0 : -0.26);
     parent.add(joint); tail.push({ joint, r: lerp(0.047, 0.034, i / (TAIL - 1)) }); parent = joint;
   }
   const tailGeo = new THREE.BufferGeometry();
@@ -634,10 +671,12 @@ function createKitten() {
       const th = r < TAIL ? 0 : (r - TAIL + 1) / CAP * PI / 2;      // anneaux du bout : une demi-sphère
       const rad = tail[i].r * (1 + 0.9 * fluff), ring = rad * Math.cos(th), up = rad * Math.sin(th);
       _c.set(0, 0, 0).applyMatrix4(m);
+      // Collision avec le sol : un anneau qui s'enfoncerait est remonté d'autant.
+      const sink = Math.max(0, groundHeight(_c.x, _c.z) + rad * 0.9 - _c.y);
       for (let j = 0; j < RAD; j++) {
         const a = j / RAD * TAU, o = (r * RAD + j) * 3;
         _q.set(ring * Math.cos(a), up, ring * Math.sin(a)).applyMatrix4(m);
-        tailPos[o] = _q.x; tailPos[o + 1] = _q.y; tailPos[o + 2] = _q.z;
+        tailPos[o] = _q.x; tailPos[o + 1] = _q.y + sink; tailPos[o + 2] = _q.z;
         _q.sub(_c).normalize();
         tailNor[o] = _q.x; tailNor[o + 1] = _q.y; tailNor[o + 2] = _q.z;
       }
@@ -661,7 +700,7 @@ function createKitten() {
     paw: 0, wiggle: 0, run: 0,
   };
   const K = {
-    root, hips, head, nose, x: 0, prevX: 0, phase: 0, move: 0,
+    root, hips, head, nose, x: 0, prevX: 0, prevZ: 0, phase: 0, move: 0, speed: 0, vs: 0, avoid: 0, steer: 0,
     p: { ...defaults }, g: { ...defaults }, defaults,
     rate: 7, lookTarget: null, lid: 1, blink: 0, blinkT: 2, flickT: 3, onStep: null,
   };
@@ -672,7 +711,9 @@ function createKitten() {
   /** Revient à la pose neutre (debout), en gardant position et cap. */
   K.neutral = (extra = {}) => K.set({ ...defaults, yaw: K.g.yaw, z: K.g.z, ...extra });
 
-  const _v = new THREE.Vector3();
+  const _v = new THREE.Vector3(), _t = new THREE.Vector3(), _a = new THREE.Vector3(), _pv = new THREE.Vector3();
+  const _fw = { y: 0, z: 0 }, _fr = { y: 0, z: 0 };
+  const _mC = new THREE.Matrix4(), _mR = new THREE.Matrix4(), _iC = new THREE.Matrix4(), _iR = new THREE.Matrix4();
   /** Position monde du bout du nez, décalée de `d` vers l'avant et de `up` vers le haut. */
   K.nosePosition = (out, d = 0, up = 0) => { nose.getWorldDirection(_v); nose.getWorldPosition(out).addScaledVector(_v, d); out.y += up; return out; };
 
@@ -690,60 +731,107 @@ function createKitten() {
 
     /* Déplacement : la phase de marche avance avec la distance parcourue. */
     const dx = K.x - K.prevX; K.prevX = K.x;
-    const speed = dt > 0 ? Math.abs(dx) / dt : 0;
+    K.speed = dt > 0 ? Math.abs(dx) / dt : 0;
+    const lean = clamp((K.speed - K.vs) * 0.1, -0.1, 0.1);     // il pique du nez en démarrant, se cabre en freinant
+    K.vs = damp(K.vs, K.speed, 3, dt);
     const grounded = p.jump < 0.03 && p.tuck < 0.3;
-    K.move = damp(K.move, speed > 0.08 && grounded ? 1 : 0, 9, dt);
-    const before = Math.floor(K.phase / PI);
-    K.phase += Math.abs(dx) / lerp(0.5, 1.2, p.run) * TAU;
-    if (K.onStep && K.move > 0.5 && Math.floor(K.phase / PI) !== before) K.onStep(p.run);
+    K.move = damp(K.move, K.speed > 0.08 && grounded ? 1 : 0, 9, dt);
+    K.phase += Math.abs(dx) / lerp(0.55, 1.25, p.run) * TAU;
+    const ph = K.phase, walk = K.move * (1 - p.run), run = K.move * p.run;
 
-    root.position.set(K.x, groundHeight(K.x, p.z) + p.jump, p.z);
+    /* Collisions avec les obstacles : le chaton s'écarte juste assez pour les contourner. */
+    let push = 0;
+    if (grounded) for (const o of obstacles) {
+      if (o.off) continue;
+      const ox = K.x + 0.04 - o.x, R = o.r + 0.27;
+      if (Math.abs(ox) >= R) continue;
+      const oz = p.z + K.avoid - o.z, need = Math.sqrt(R * R - ox * ox);
+      if (Math.abs(oz) < need) push += (Math.sign(oz || g.z - o.z || -1)) * need - oz;
+    }
+    K.avoid = damp(K.avoid, push ? K.avoid + push : 0, push ? 14 : 2.5, dt);
+    const z = p.z + K.avoid;
+    // Le corps s'oriente dans le sens réel du déplacement (il tourne pour contourner).
+    const vz = dt > 0 ? (z - K.prevZ) / dt : 0; K.prevZ = z;
+    K.steer = damp(K.steer, Math.atan2(vz, Math.max(K.speed, 0.6)) * K.move * Math.sign(dx || 1), 6, dt);
+
+    const groundY = groundHeight(K.x, z);
+    root.position.set(K.x, groundY + p.jump, z);
     tilt.rotation.z = Math.atan(pathSlope(K.x)) * 0.8 * (1 - p.lie * 0.6);
-    yawG.rotation.y = p.yaw;
+    yawG.rotation.y = p.yaw - K.steer;
 
-    /* Bassin : hauteur et tangage selon la pose, plus le rebond de l'allure. */
-    let hipY = 0.36 - 0.01 * p.sit - 0.09 * p.crouch - 0.04 * p.stretch;
-    let pitch = -0.62 * p.sit + 0.22 * p.crouch + 0.4 * p.stretch;      // négatif = nez vers le haut
-    hipY = lerp(hipY, 0.175, p.lie); pitch *= 1 - p.lie;
+    /* Bassin : hauteur et tangage selon la pose. */
+    let hipY = 0.36 - 0.08 * p.sit - 0.09 * p.crouch - 0.04 * p.stretch;
+    let pitch = -0.75 * p.sit + 0.22 * p.crouch + 0.4 * p.stretch + lean;   // négatif = nez vers le haut
+    hipY = lerp(hipY, 0.19, p.lie); pitch *= 1 - p.lie;
     hipY = lerp(hipY, 0.23, p.tuck); hipY = lerp(hipY, 0.27, p.air);
-    hipY += lerp(Math.abs(Math.sin(K.phase)) * 0.018, Math.max(0, Math.sin(K.phase + 0.6)) * 0.1, p.run) * K.move;
-    pitch += Math.sin(K.phase + 1.2) * 0.13 * p.run * K.move;            // tangage du galop
-    const wig = Math.sin(t * 15) * p.wiggle;                             // dandinement avant le bond
-    hips.position.set(-wig * 0.012, hipY * lerp(1, p.squash, 0.7) + Math.sin(t * 2.1) * 0.004, 0);
-    hips.rotation.set(pitch + p.spin, wig * 0.17, p.roll + 0.22 * p.lie);
+
+    /* Allure : au pas, l'échine ondule et les hanches roulent ; au galop, le dos
+       se ramasse (pattes regroupées) puis se détend (pattes en extension). */
+    const bunch = Math.cos(ph) * run;
+    hipY += Math.cos(ph * 2) * 0.007 * walk + bunch * 0.035 + Math.max(0, Math.sin(ph - 1.0)) * 0.07 * run;
+    pitch += -Math.sin(ph) * 0.07 * run;
+    const wig = Math.sin(t * 15) * p.wiggle;                                 // dandinement avant le bond
+    chestG.rotation.set(bunch * 0.17 + 0.18 * p.sit, -Math.sin(ph) * 0.08 * walk, -Math.sin(ph) * 0.04 * walk);
+    chestG.position.y = Math.sin(ph * 2) * 0.006 * walk;
+    rumpG.rotation.set(-bunch * 0.26 + 0.12 * p.sit, Math.cos(ph) * 0.12 * walk + wig * 0.2, Math.cos(ph) * 0.05 * walk);
+    hips.position.set(-wig * 0.008, hipY * lerp(1, p.squash, 0.7) + Math.sin(t * 2.1) * 0.004, 0);
+    hips.rotation.set(pitch + p.spin, 0, p.roll + 0.22 * p.lie);
     const sq = p.squash, inv = 1 / Math.sqrt(sq);
     hips.scale.set(inv, sq, inv);
     const breath = 1 + Math.sin(t * lerp(2.4, 1.3, p.lie)) * 0.022;
-    body.scale.set(0.2 * breath, 0.195 * breath, 0.34);
+    body.scale.set(0.2 * breath, 0.195 * breath, 0.31 * (1 - bunch * 0.1));
 
-    /* Pattes : chaque patte reçoit un angle « monde » puis s'allonge juste
-       assez pour toucher le sol (une cinématique inverse très simplifiée). */
-    for (let i = 0; i < 4; i++) {
-      const front = i < 2, leg = legs[i];
-      const phW = K.phase + (i === 0 || i === 3 ? 0 : PI);                 // pas : diagonales alternées
-      const phR = K.phase + (front ? 0 : PI * 0.85) + (i % 2) * 0.45;      // galop : avant puis arrière
-      let a = lerp(Math.sin(phW) * 0.5, Math.sin(phR) * 0.95, p.run) * K.move;
-      const lift = lerp(Math.max(0, -Math.cos(phW)), Math.max(0, -Math.cos(phR)), p.run) * K.move;
-      let plant = 1, len = 1;
-      a += front ? -0.3 * p.crouch - 0.95 * p.stretch : 0.15 * p.stretch;
-      if (!front) { a = lerp(a, -1.3, p.sit); plant *= 1 - p.sit; len = lerp(len, 0.9, p.sit); }   // assis : pattes arrière repliées
-      a = lerp(a, front ? -1.35 : -1.25, p.lie); plant *= 1 - p.lie; len = lerp(len, 0.55, p.lie);
-      a = lerp(a, front ? 0.7 : -0.7, p.tuck); plant *= 1 - p.tuck; len = lerp(len, 0.6, p.tuck);   // en boule
-      a = lerp(a, Math.sin(t * 10 + i * 1.9) * 0.55 + (front ? -0.3 : 0.3), p.air); plant *= 1 - p.air;   // sur le dos, pattes en l'air
-      if (i === 0) { a = lerp(a, -1.45, p.paw); plant *= 1 - p.paw; len = lerp(len, 1.15, p.paw); }  // patte tendue
-      const flying = clamp(p.jump * 5, 0, 1) * (1 - p.tuck) * (1 - p.air);
-      a = lerp(a, front ? -0.85 : 0.85, flying); plant *= 1 - flying;      // en plein saut : pattes écartées
-      const pivotY = hipY + leg.position.y * Math.cos(pitch) - leg.position.z * Math.sin(pitch);
-      const planted = clamp(pivotY / Math.max(0.4, Math.cos(a)) / LEG, 0.5, 1.45);
-      leg.rotation.x = a - pitch;
-      leg.scale.y = lerp(len, planted, plant) * (1 - lift * 0.28);
-    }
-
-    /* Tête : compense le tangage du corps pour rester à l'horizontale. */
+    /* Tête : compense le tangage du corps pour rester à l'horizontale, et
+       garde le cap pendant que les épaules roulent. */
     neck.position.y = 0.17 - 0.1 * p.lie - 0.09 * p.air;
-    neck.rotation.x = -pitch * 0.92;
-    const bob = Math.sin(K.phase * 2 + 0.5) * 0.025 * K.move;
-    head.rotation.set(p.headPitch + bob + 0.05 * p.lie, p.headYaw, p.headRoll - p.roll * 0.35 * p.air);   // sur le dos, la tête se redresse un peu
+    neck.rotation.x = -(pitch + chestG.rotation.x) * 0.92;
+    const bob = Math.sin(ph * 2 + 0.5) * 0.02 * K.move;
+    head.rotation.set(p.headPitch + bob + 0.05 * p.lie, p.headYaw - chestG.rotation.y * 0.9, p.headRoll - p.roll * 0.35 * p.air - chestG.rotation.z);
+
+    /* Collision du corps avec le sol : on mesure le point le plus bas des
+       volumes (tronc et tête). Au repos (assis, couché, sur le dos), le corps
+       est posé exactement au sol ; debout, on l'empêche seulement de s'y enfoncer. */
+    root.updateMatrixWorld(true);
+    let low = Infinity;
+    for (const part of [body, chest, rump, skull]) {
+      const e = part.matrixWorld.elements;
+      low = Math.min(low, e[13] - Math.hypot(e[1], e[5], e[9]));
+    }
+    const rest = Math.max(p.sit, p.lie, p.air), gapY = groundY + p.jump - low;
+    hips.position.y += gapY * rest + Math.max(0, gapY) * (1 - rest);
+    contact.material.opacity = 0.32 * clamp(1 - p.jump * 1.6, 0, 1);
+    contact.scale.set(0.6 + 0.1 * rest, 0.95 - 0.25 * p.sit, 1);
+
+    /* Pattes : chaque pied vise un point du sol (ou de l'air, quand la patte
+       est levée) ; la cinématique inverse plie coudes et genoux en conséquence. */
+    hips.updateMatrix(); chestG.updateMatrix(); rumpG.updateMatrix();
+    _mC.multiplyMatrices(hips.matrix, chestG.matrix); _iC.copy(_mC).invert();
+    _mR.multiplyMatrices(hips.matrix, rumpG.matrix); _iR.copy(_mR).invert();
+    const flying = clamp(p.jump * 5, 0, 1) * (1 - p.tuck) * (1 - p.air);
+    const cyc = ph / TAU;
+    for (let i = 0; i < 4; i++) {
+      const L = legs[i], front = L.front, M = front ? _mC : _mR, inv = front ? _iC : _iR;
+      // Cycle de l'allure (mélange pas / galop).
+      const uW = (cyc + WALK[i]) % 1, uR = (cyc + RUN[i]) % 1;
+      footCycle(uW, 0.62, 0.17, 0.06, _fw); footCycle(uR, 0.34, 0.21, 0.11, _fr);
+      const u = p.run > 0.5 ? uR : uW;
+      if (front && u < L.u && K.move > 0.5 && K.onStep) K.onStep(p.run);     // le pied se pose : petit bruit de pas
+      L.u = u;
+      const gz = lerp(_fw.z, _fr.z, p.run) * K.move, gy = lerp(_fw.y, _fr.y, p.run) * K.move;
+      // Pied posé au sol, dans le repère du chaton (y = 0 : le sol).
+      const spread = front ? 1 - 0.3 * p.sit + 0.25 * p.lie : 1 + 0.35 * p.sit + 0.35 * p.lie;
+      _t.set(L.restX * spread,
+        0.05 + gy,
+        L.restZ + gz + (front ? 0.22 * p.stretch + 0.12 * p.lie - 0.07 * p.sit + 0.04 * p.crouch : 0.2 * p.sit + 0.12 * p.lie));
+      _pv.copy(L.pivot).applyMatrix4(M);                       // épaule ou hanche, dans ce même repère
+      if (flying > 0) _t.lerp(_a.set(_pv.x, _pv.y - 0.1, _pv.z + (front ? 0.27 : -0.28)), flying);   // en plein saut : pattes en extension
+      if (i === 0 && p.paw > 0) _t.lerp(_a.set(_pv.x * 0.6, _pv.y + 0.08, _pv.z + 0.3), p.paw);       // patte tendue vers l'avant
+      _t.applyMatrix4(inv);                                    // vers le repère du demi-tronc
+      // Poses où les pattes ne touchent plus terre : en boule, ou sur le dos à pédaler.
+      if (p.tuck > 0) _t.lerp(_a.set(L.pivot.x, L.pivot.y - 0.15, L.pivot.z + (front ? -0.09 : 0.09)), p.tuck);
+      if (p.air > 0) _t.lerp(_a.set(L.pivot.x, L.pivot.y - 0.22 + Math.sin(t * 10 + i * 2.3) * 0.05, L.pivot.z + (front ? -0.03 : 0.05) + Math.sin(t * 10 + i * 1.9) * 0.12), p.air);
+      solveLeg(L, _t.x, _t.y, _t.z);
+    }
 
     /* Yeux : clignements spontanés, pupilles, regard (qui suit un peu la souris). */
     K.blinkT -= dt;
@@ -772,11 +860,12 @@ function createKitten() {
     mouth.scale.set(0.016 + 0.008 * p.mouth, 0.004 + 0.034 * p.mouth, 0.02);
 
     /* Queue : une onde parcourt la chaîne d'articulations. */
-    tail[0].joint.rotation.x = lerp(-2.0, -0.35, (p.tailUp + 1) / 2) - pitch * 0.8;
+    tail[0].joint.rotation.x = lerp(-2.0, -0.35, (p.tailUp + 1) / 2) - (pitch + rumpG.rotation.x) * 0.8;
     for (let i = 1; i < tail.length; i++) {
       const j = tail[i].joint;
       j.rotation.x = 0.068 * p.tailUp + Math.sin(t * 2.2 - i * 0.37) * 0.05 * (1 - p.lie);
-      j.rotation.z = Math.sin(t * (1.6 + 4 * p.wiggle) - i * 0.33) * p.tailWag * 0.15 + p.tailWrap * 0.2;
+      j.rotation.z = Math.sin(t * (1.6 + 4 * p.wiggle) - i * 0.33) * p.tailWag * 0.15 + p.tailWrap * 0.2
+        - Math.sin(ph - i * 0.35) * 0.05 * K.move;      // la queue fait contrepoids à chaque pas
     }
     skinTail(p.tailFluff);   // tailFluff : la queue en écouvillon des grandes frayeurs
   };
@@ -898,6 +987,7 @@ const V = (() => {
   const cyl = (rt, rb, h, y) => { const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, 36), stone); m.position.y = y; m.castShadow = true; base.add(m); };
   cyl(0.17, 0.185, 0.05, 0.025); cyl(0.115, 0.13, 0.3, 0.2); cyl(0.175, 0.14, 0.05, 0.375);
   const TOP = 0.4;
+  obstacles.push({ x: X_VASE, z: 0, r: 0.2 });       // le chaton contourne le socle
 
   // Profil du vase, tourné autour de son axe.
   const profile = new THREE.SplineCurve([[0.001, 0], [0.07, 0.004], [0.115, 0.07], [0.12, 0.15], [0.085, 0.25], [0.05, 0.31], [0.052, 0.35], [0.075, 0.38]].map(p => new THREE.Vector2(...p))).getPoints(30);
@@ -955,6 +1045,11 @@ const V = (() => {
       if (s.rest) continue;
       s.v.y -= 9.8 * dt; s.m.position.addScaledVector(s.v, dt);
       s.m.rotation.x += s.w.x * dt; s.m.rotation.y += s.w.y * dt; s.m.rotation.z += s.w.z * dt;
+      // Collisions des éclats : le socle les repousse, le chaton aussi.
+      for (const [cx, cz, cr, top] of [[0, 0, 0.2, TOP], [K.x - base.position.x, K.root.position.z, 0.27, 0.5]]) {
+        const ox = s.m.position.x - cx, oz = s.m.position.z - cz, d = Math.hypot(ox, oz);
+        if (d < cr && d > 1e-4 && s.m.position.y < top) { s.m.position.x = cx + ox / d * cr; s.m.position.z = cz + oz / d * cr; s.v.x = ox / d * 0.6; s.v.z = oz / d * 0.6; }
+      }
       const f = floor(s.m.position.x, s.m.position.z) + 0.02;
       if (s.m.position.y < f) {
         s.m.position.y = f;
@@ -986,6 +1081,7 @@ const Y = (() => {
   thread.frustumCulled = false; scene.add(thread);
 
   const Y = { mesh, pos: mesh.position, x: X_YARN, v: 0, free: false, held: false, n: 0, last: X_YARN };
+  obstacles.push({ get x() { return Y.x; }, z: 0.12, r: R + 0.14, get off() { return Y.held; } });   // le chaton la contourne aussi
   Y.reset = () => { Object.assign(Y, { x: X_YARN, v: 0, free: false, held: false, n: 0, last: X_YARN }); threadGeo.setDrawRange(0, 0); mesh.rotation.set(0, 0, 0); };
   Y.update = (dt, t) => {
     threadMat.color.copy(nearMat.color);
@@ -999,6 +1095,13 @@ const Y = (() => {
       Y.v += (-9.8 * slope * 0.6 - 0.22 * Y.v - Math.sign(Y.v) * 0.05) * dt;
       if (Math.abs(Y.v) < 0.06 && Math.abs(slope) < 0.04) Y.v = 0;
       Y.x += Y.v * dt;
+      // Collision avec le chaton : la pelote bute contre lui et rebondit mollement.
+      const gap = Y.x - K.x, reach = R + 0.27;
+      if (K.p.jump < 0.1 && Math.abs(K.root.position.z - 0.12) < 0.3 && Math.abs(gap) < reach) {
+        const side = Math.sign(gap) || 1;
+        Y.x = K.x + side * reach;
+        if (Y.v * side < 0) Y.v *= -0.35;
+      }
       mesh.rotation.z -= Y.v * dt / R;
       while (Y.x - Y.last > 0.1 && Y.n < MAXP) {   // le fil se dévide derrière elle
         Y.last += 0.1;
@@ -1276,7 +1379,7 @@ function toggleMute() { audio.setMuted(!audio.muted); muteEl.textContent = audio
 muteEl.addEventListener('click', toggleMute);
 window.addEventListener('keydown', e => { if (e.key === 'm' || e.key === 'M') toggleMute(); });
 /* On suspend le son quand l'onglet n'est plus visible. */
-document.addEventListener('visibilitychange', () => { if (audio.ctx) document.hidden ? audio.ctx.suspend() : audio.ctx.resume(); });
+document.addEventListener('visibilitychange', () => { if (audio.ctx) document.hidden || paused ? audio.ctx.suspend() : audio.ctx.resume(); });
 
 /* ==========================================================================
    11. LE RÉCIT
@@ -1313,12 +1416,7 @@ function* meow(pitch = 1) { sfx.meow(pitch); K.set({ mouth: 1, eyeOpen: 0.55 });
 const tasks = [];
 const spawn = gen => { gen.next(); tasks.push(gen); };
 
-const chapterEl = document.getElementById('chapter'), fadeEl = document.getElementById('fade');
-let chapterTimer = 0;
-function chapter(num, title) {
-  chapterEl.innerHTML = `<b>${num}</b>${title}`; chapterEl.classList.add('on');
-  clearTimeout(chapterTimer); chapterTimer = setTimeout(() => chapterEl.classList.remove('on'), 4600 / SPEED);
-}
+const fadeEl = document.getElementById('fade');
 
 /* Pose du sommeil : couché en rond, la queue ramenée contre lui. */
 const SLEEP = { lie: 1, eyeOpen: 0, tailWrap: 1, tailUp: -0.9, tailWag: 0.04, yaw: 0.95, headYaw: -0.55, headPitch: -0.22, headRoll: -0.18, earBack: 0.15 };
@@ -1338,7 +1436,6 @@ function resetWorld(sceneIndex = 1) {
 
 /* --- I. L'éveil -------------------------------------------------------------------- */
 function* sceneWake() {
-  chapter('i', 'l’éveil');
   shot({ dist: 4.2, height: 0.3, az: 0.3, ahead: 0, lift: 0.6 });
   world.todGoal = 0.1; music.motif();
   yield* wait(2.6, zzz);
@@ -1358,7 +1455,6 @@ function* sceneWake() {
 
 /* --- II. Le papillon ---------------------------------------------------------------- */
 function* sceneButterfly() {
-  chapter('ii', 'le papillon');
   world.todGoal = 0.25; music.energy = 0.55;
   shot({ dist: 6.2, height: 0.45, az: 0.12, ahead: 0.9, lift: 1.0 }, 0.7);
   const gy = x => pathHeight(x);
@@ -1419,7 +1515,6 @@ function* sceneButterfly() {
 
 /* --- III. La bêtise ------------------------------------------------------------------- */
 function* sceneVase() {
-  chapter('iii', 'la bêtise');
   world.todGoal = 0.42; music.energy = 0.6;
   shot({ dist: 7.5, height: 0.5, az: -0.08, ahead: 1.4, lift: 1.2 }, 0.6);
   yield* walkTo(X_VASE - 2.6, 1.15);
@@ -1464,7 +1559,6 @@ function* sceneVase() {
 
 /* --- IV. La pelote --------------------------------------------------------------------- */
 function* sceneYarn() {
-  chapter('iv', 'la pelote');
   world.todGoal = 0.55;
   shot({ dist: 7, height: 0.45, az: 0.05, ahead: 1.2, lift: 1.1 }, 0.6);
   yield* walkTo(X_YARN - 1.7, 1.15);
@@ -1498,7 +1592,7 @@ function* sceneYarn() {
   const hearts = every(1.3, () => emote('heart', K.x + rand(-0.2, 0.2), K.root.position.y + 0.8, 0.2, { color: CORAL, size: 0.15, life: 2.2, vy: 0.4, sway: 0.25 }));
   yield* wait(4.2, (k, dt) => { K.set({ roll: -2.3 + Math.sin(time * 3.2) * 0.3 }); if (k > 0.3) hearts(k, dt); });
   // La pelote lui échappe ; il se remet d'aplomb.
-  sfx.purr(false); Y.held = false; Y.x = K.x + 0.25; Y.v = 1.2; Y.free = true;
+  sfx.purr(false); Y.held = false; Y.x = K.x + 0.62; Y.v = 1.0; Y.free = true;
   K.set({ roll: 0, air: 0 }); yield* wait(0.7);
   K.neutral({ sit: 1, tailUp: -0.7, tailWrap: 0.35 }); K.lookTarget = Y.pos; yield* wait(1.6);
   K.lookTarget = null; K.set({ headPitch: -0.45, headYaw: -0.3, pupil: 1.3 }); yield* wait(1.6);   // il lève le nez : le ciel a changé
@@ -1506,7 +1600,6 @@ function* sceneYarn() {
 
 /* --- V. La lune ---------------------------------------------------------------------------- */
 function* sceneMoon() {
-  chapter('v', 'la lune');
   world.todGoal = 1; world.todRate = 0.1; music.energy = 0.3; music.night = 1;
   shot({ dist: 8.5, height: 0.6, az: -0.28, ahead: 1.6, lift: 1.5 }, 0.5);
   K.neutral({ tailUp: 0.5 });
@@ -1609,6 +1702,21 @@ function start() {
   script = story(START_SCENE); script.next();
 }
 introEl.addEventListener('click', start);
+
+/* Barre d'espace : met le film en pause (image et son), ou le relance. */
+let paused = false;
+const pauseEl = document.getElementById('pause');
+function togglePause() {
+  paused = !paused;
+  pauseEl.classList.toggle('on', paused);
+  if (audio.ctx) paused ? audio.ctx.suspend() : audio.ctx.resume();
+}
+window.addEventListener('keydown', e => {
+  if (e.code !== 'Space' || e.repeat) return;
+  e.preventDefault();                       // ni défilement de page, ni clic sur un bouton resté actif
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  if (!started) start(); else togglePause();
+});
 script = slumber(); script.next();
 
 const clock = new THREE.Clock();
@@ -1616,13 +1724,13 @@ updateCamera(0, 0, true);
 renderer.setAnimationLoop(() => {
   // dt borné : un onglet resté en arrière-plan ne provoque pas de saut.
   const dt = Math.min(clock.getDelta(), 0.05) * SPEED;
-  if (!window.__debug.manual) step(dt);
+  if (!paused && !window.__debug.manual) step(dt);
   renderer.render(scene, camera);
 });
 
 /* Petit accès de mise au point (console) : avancer le temps sans attendre. */
 document.getElementById('error').style.display = 'none';
-window.__debug = { manual: false, step, start, audio, music, world, cam, camGoal, K, render: () => renderer.render(scene, camera) };
+window.__debug = { manual: false, togglePause, get paused() { return paused; }, get time() { return time; }, step, start, audio, music, world, cam, camGoal, K, render: () => renderer.render(scene, camera) };
 </script>
 <script>
   /* Si le module n'a pas pu se charger (pas de réseau), on l'explique. */
