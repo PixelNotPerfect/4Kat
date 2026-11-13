@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Premiers pas — le voyage d'un chaton</title>
+<!--
+  PREMIERS PAS
+  Motion design 3D interactif et autonome : un chaton noir (une tache blanche
+  sur le museau) découvre le monde, de l'aube à la nuit.
+
+  - Un seul fichier : HTML + CSS + JavaScript. Three.js est chargé depuis un CDN.
+  - Aucun asset externe : géométries, textures et sons sont générés par le code.
+  - Palette noir et blanc ; deux accents seulement, réservés aux événements
+    (corail : papillon et cœurs ; or : lucioles).
+
+  Paramètres d'URL facultatifs (pratiques pour régler une scène) :
+    ?scene=2   démarre directement au chapitre indiqué (1 à 5)
+    ?speed=3   multiplie la vitesse du récit
+-->
+<style>
+  :root { --serif: "Cormorant Garamond", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #f4f4f1; }
+  body { font-family: var(--serif); -webkit-font-smoothing: antialiased; }
+
+  /* Le canvas WebGL occupe toute la fenêtre. */
+  #scene { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+
+  /* Vignette très légère pour refermer le cadre. */
+  #vignette {
+    position: fixed; inset: 0; pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, .16) 100%);
+  }
+
+  /* Voile de fondu utilisé entre la fin du récit et son recommencement. */
+  #fade {
+    position: fixed; inset: 0; background: #0a0a0c; opacity: 0; pointer-events: none;
+    transition: opacity 2.4s ease;
+  }
+  #fade.on { opacity: 1; }
+
+  /* Textes posés sur l'image : le mode « difference » les garde lisibles
+     aussi bien sur le blanc de l'aube que sur le noir de la nuit. */
+  .ink { color: #fff; mix-blend-mode: difference; }
+
+  #chapter {
+    position: fixed; left: 50%; bottom: 9vh; transform: translateX(-50%);
+    text-align: center; font-style: italic; letter-spacing: .32em; text-transform: lowercase;
+    font-size: clamp(13px, 1.5vw, 19px); opacity: 0; transition: opacity 1.6s ease;
+    pointer-events: none; white-space: nowrap;
+  }
+  #chapter.on { opacity: .85; }
+  #chapter b { font-weight: normal; font-style: normal; letter-spacing: .5em; margin-right: .6em; }
+
+  #intro {
+    position: fixed; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: flex-start; padding-top: 13vh;
+    text-align: center; transition: opacity 1.4s ease; cursor: pointer;
+  }
+  #intro.off { opacity: 0; pointer-events: none; }
+  #intro h1 { margin: 0; font-weight: normal; font-style: italic; font-size: clamp(34px, 6.4vw, 84px); letter-spacing: .04em; }
+  #intro p { margin: .6em 0 0; font-size: clamp(12px, 1.4vw, 17px); letter-spacing: .42em; text-transform: uppercase; }
+  #start {
+    margin-top: 5vh; padding: .8em 2.2em; font: inherit; font-size: clamp(13px, 1.4vw, 17px);
+    letter-spacing: .35em; text-transform: lowercase; color: inherit; background: none;
+    border: 1px solid currentColor; border-radius: 99px; cursor: pointer;
+    transition: background .4s, color .4s;
+  }
+  #start:hover { background: #fff; color: #000; }
+  #intro small { margin-top: 1.4em; font-style: italic; letter-spacing: .12em; opacity: .7; font-size: 13px; }
+
+  #mute {
+    position: fixed; right: 22px; bottom: 18px; font: inherit; font-style: italic; font-size: 14px;
+    letter-spacing: .14em; background: none; border: none; cursor: pointer; opacity: .55; padding: 6px;
+    transition: opacity .3s;
+  }
+  #mute:hover { opacity: 1; }
+
+  #error {
+    position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    padding: 2em; text-align: center; font-style: italic; color: #222; background: #f4f4f1;
+  }
+</style>
+</head>
+<body>
+<canvas id="scene"></canvas>
+<div id="vignette"></div>
+<div id="fade"></div>
+<div id="chapter" class="ink"></div>
+<div id="intro" class="ink">
+  <h1>Premiers pas</h1>
+  <p>le voyage d'un chaton</p>
+  <button id="start">commencer</button>
+  <small>avec le son, c'est encore plus doux</small>
+</div>
+<button id="mute" class="ink" aria-label="Activer ou couper le son">son : oui</button>
+<div id="error">Impossible de charger Three.js. Une connexion internet est nécessaire au premier lancement.</div>
+
+<!-- Three.js (module ES) depuis jsDelivr, version figée pour rester reproductible. -->
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
+/* ==========================================================================
+   1. OUTILS
+   ========================================================================== */
+
+const PI = Math.PI, TAU = Math.PI * 2;
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+/** Interpolation douce entre deux seuils (0 avant a, 1 après b). */
+const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+/** Amortissement indépendant du framerate : rapproche `cur` de `target`. */
+const damp = (cur, target, rate, dt) => lerp(cur, target, 1 - Math.exp(-rate * dt));
+const easeInOut = t => t * t * (3 - 2 * t);
+const easeOut = t => 1 - Math.pow(1 - t, 3);
+
+/** Générateur pseudo-aléatoire à graine : le décor est identique à chaque visite. */
+function seeded(seed) {
+  let s = seed >>> 0;
+  return () => {
+    s = (s + 0x6D2B79F5) >>> 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const rnd = seeded(20261113);
+const rand = (a = 1, b) => (b === undefined ? rnd() * a : a + rnd() * (b - a));
+
+const params = new URLSearchParams(location.search);
+const SPEED = clamp(parseFloat(params.get('speed')) || 1, 0.1, 20);
+const START_SCENE = clamp(parseInt(params.get('scene')) || 1, 1, 5);
+
+/* ==========================================================================
+   2. RENDU, SCÈNE, CAMÉRA
+   ========================================================================== */
+
+const canvas = document.getElementById('scene');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0xf4f4f1, 9, 120);   // la brume fond les plans lointains dans le ciel
+
+const camera = new THREE.PerspectiveCamera(34, window.innerWidth / window.innerHeight, 0.1, 400);
+
+/* ==========================================================================
+   3. LE MONDE : relief, ciel, plans de collines, végétation
+   Le chaton avance le long de l'axe X, sur la crête d'une longue dune.
+   La caméra regarde depuis +Z ; les plans de décor s'étagent vers -Z.
+   ========================================================================== */
+
+/* Repères du récit le long du chemin (en unités de scène). */
+const X_START = 0;        // là où le chaton dort
+const X_BUTTERFLY = 4.5;  // rencontre avec le papillon
+const X_VASE = 15.5;      // le vase sur son socle
+const X_YARN = 23.3;      // la pelote, juste avant la pente
+const X_MOON = 59.5;      // le promontoire final
+
+/** Grandes ondulations du parcours : une descente, puis la montée finale. */
+const pathTrend = x => -2.2 * smooth(24, 43, x) + 1.8 * smooth(46, 58, x);
+/** Hauteur du chemin (z = 0) : la tendance plus de petites bosses. */
+const pathHeight = x => pathTrend(x) + 0.2 * Math.sin(x * 0.21 + 2.0) + 0.08 * Math.sin(x * 0.53 + 0.7);
+/** Pente du chemin (dérivée numérique). */
+const pathSlope = x => (pathHeight(x + 0.05) - pathHeight(x - 0.05)) / 0.1;
+/** Hauteur du sol en tout point : une crête qui retombe de part et d'autre. */
+function groundHeight(x, z) {
+  const d = Math.max(0, Math.abs(z) - 1.2);
+  return pathHeight(x) - (z < 0 ? 0.05 : 0.02) * d * d;
+}
+
+/* --- Ciel : un dégradé plein écran dessiné derrière tout le reste --------- */
+const skyMat = new THREE.ShaderMaterial({
+  uniforms: { top: { value: new THREE.Color() }, bottom: { value: new THREE.Color() } },
+  vertexShader: /* glsl */`
+    varying vec2 vUv;
+    void main() { vUv = uv; gl_Position = vec4(position.xy, 1.0, 1.0); }`,
+  fragmentShader: /* glsl */`
+    uniform vec3 top; uniform vec3 bottom; varying vec2 vUv;
+    void main() {
+      vec3 c = mix(bottom, top, smoothstep(0.3, 1.0, vUv.y));
+      // léger tramage pour éviter les bandes dans le dégradé
+      c += (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
+      gl_FragColor = vec4(c, 1.0);
+      #include <colorspace_fragment>
+    }`,
+  depthTest: false, depthWrite: false,
+});
+const sky = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), skyMat);
+sky.frustumCulled = false; sky.renderOrder = -10;
+scene.add(sky);
+
+/* --- Textures procédurales (dessinées dans un canvas 2D) ------------------ */
+function canvasTexture(size, draw) {
+  const c = document.createElement('canvas'); c.width = c.height = size;
+  const g = c.getContext('2d'); draw(g, size);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const softDot = canvasTexture(64, (g, s) => {
+  const grad = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+  grad.addColorStop(0, 'rgba(255,255,255,1)'); grad.addColorStop(0.35, 'rgba(255,255,255,.55)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grad; g.fillRect(0, 0, s, s);
+});
+
+/* --- Astre : soleil pâle le jour, grande lune la nuit --------------------- */
+const astro = new THREE.Group();
+const astroDisc = new THREE.Mesh(new THREE.CircleGeometry(1, 64), new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false }));
+const astroHalo = new THREE.Sprite(new THREE.SpriteMaterial({ map: softDot, color: 0xffffff, transparent: true, opacity: 0.35, fog: false, depthWrite: false }));
+astroHalo.scale.setScalar(5.5); astroHalo.position.z = -0.5;
+astro.add(astroHalo, astroDisc);
+scene.add(astro);
+
+/* --- Étoiles : visibles seulement quand la nuit tombe --------------------- */
+const starsGeo = new THREE.BufferGeometry();
+{
+  const pos = [];
+  for (let i = 0; i < 420; i++) pos.push(rand(-150, 150), rand(2, 75), -110 - rand(20));
+  starsGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+}
+const starsMat = new THREE.PointsMaterial({ color: 0xffffff, size: 2.2, sizeAttenuation: false, map: softDot, transparent: true, opacity: 0, fog: false, depthWrite: false });
+const stars = new THREE.Points(starsGeo, starsMat);
+stars.frustumCulled = false;
+scene.add(stars);
+
+/* --- Nuages : quelques galets flous qui dérivent --------------------------- */
+const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false });
+const clouds = [];
+{
+  const blob = new THREE.CircleGeometry(1, 40);
+  for (let i = 0; i < 7; i++) {
+    const cloud = new THREE.Group();
+    const n = 3 + Math.floor(rand(3));
+    for (let j = 0; j < n; j++) {
+      const m = new THREE.Mesh(blob, cloudMat);
+      m.scale.set(rand(3, 6.5), rand(0.7, 1.3), 1);
+      m.position.set(rand(-4, 4), rand(-0.5, 0.5), j * 0.01);
+      cloud.add(m);
+    }
+    cloud.userData = { offset: rand(-70, 70), y: rand(7, 20), speed: rand(0.15, 0.4) };
+    cloud.position.z = -100;
+    clouds.push(cloud); scene.add(cloud);
+  }
+}
+
+/* --- Plans de collines : des silhouettes de plus en plus pâles ------------- */
+const inkMat = new THREE.MeshBasicMaterial({ color: 0x2c2c2e });   // « encre » des silhouettes
+const LAYERS = [
+  { z: -16, base: 0.2, amp: 0.8, freq: 0.110, follow: 0.85, peaks: 0 },
+  { z: -27, base: 1.3, amp: 1.3, freq: 0.071, follow: 0.6, peaks: 0 },
+  { z: -42, base: 2.9, amp: 2.0, freq: 0.047, follow: 0.35, peaks: 0.5 },
+  { z: -62, base: 5.0, amp: 3.2, freq: 0.031, follow: 0.15, peaks: 1 },
+  { z: -90, base: 8.0, amp: 5.5, freq: 0.019, follow: 0, peaks: 1 },
+];
+/** Profil d'un plan : dunes arrondies au premier plan, crêtes pointues au loin. */
+function layerHeight(L, i, x) {
+  const p = i * 7.31;
+  const round = 0.6 * Math.sin(x * L.freq + p) + 0.3 * Math.sin(x * L.freq * 2.3 + p * 1.7) + 0.1 * Math.sin(x * L.freq * 5.1 + p * 0.6);
+  const sharp = 1.2 * (1 - Math.abs(Math.sin(x * L.freq * 0.9 + p))) + 0.5 * (1 - Math.abs(Math.sin(x * L.freq * 2.1 + p * 2.0))) - 0.9;
+  return L.base + pathTrend(x) * L.follow + L.amp * lerp(round, sharp, L.peaks);
+}
+LAYERS.forEach((L, i) => {
+  const x0 = -150, x1 = 220, step = 0.75, verts = [], idx = [];
+  for (let x = x0, n = 0; x <= x1; x += step, n++) {
+    verts.push(x, layerHeight(L, i, x), L.z, x, -60, L.z);
+    if (n > 0) { const a = (n - 1) * 2; idx.push(a, a + 1, a + 2, a + 2, a + 1, a + 3); }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+  geo.setIndex(idx);
+  scene.add(new THREE.Mesh(geo, inkMat));
+});
+
+/* Arbres en silhouette posés sur les deux premiers plans. */
+{
+  const trunk = new THREE.PlaneGeometry(1, 1), crown = new THREE.CircleGeometry(1, 28);
+  for (let li = 0; li < 2; li++) {
+    const L = LAYERS[li];
+    for (let x = -40; x < 110; x += rand(3.5, 10)) {
+      const h = rand(1.2, 2.6) * (1 + li * 0.5), y = layerHeight(L, li, x), z = L.z + 0.05;
+      const t = new THREE.Mesh(trunk, inkMat); t.scale.set(0.07 * (1 + li), h, 1); t.position.set(x, y + h / 2 - 0.1, z);
+      const c = new THREE.Mesh(crown, inkMat); c.scale.set(h * rand(0.28, 0.4), h * rand(0.42, 0.6), 1); c.position.set(x, y + h, z);
+      scene.add(t, c);
+    }
+  }
+}
+
+/* --- Sol : la dune sur laquelle marche le chaton --------------------------- */
+const groundMat = new THREE.MeshBasicMaterial({ color: 0xf6f6f3, vertexColors: true });
+const groundGeo = new THREE.PlaneGeometry(160, 28, 320, 28);
+groundGeo.rotateX(-PI / 2);
+groundGeo.translate(35, 0, -2);
+{
+  const pos = groundGeo.attributes.position, col = new Float32Array(pos.count * 3);
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), z = pos.getZ(i);
+    pos.setY(i, groundHeight(x, z));
+    // la dune s'assombrit doucement en s'éloignant de la crête : cela lui donne du volume
+    const shade = 1 - 0.3 * smooth(1.0, 11, Math.abs(z)) - 0.04 * Math.sin(x * 0.9 + z * 1.3);
+    col[i * 3] = col[i * 3 + 1] = col[i * 3 + 2] = shade;
+  }
+  groundGeo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  groundGeo.computeVertexNormals();
+}
+const ground = new THREE.Mesh(groundGeo, groundMat);
+scene.add(ground);
+/* Même géométrie, mais ne dessine que les ombres portées (teinte du sol maîtrisée). */
+const shadowMat = new THREE.ShadowMaterial({ opacity: 0.3 });
+const groundShadow = new THREE.Mesh(groundGeo, shadowMat);
+groundShadow.receiveShadow = true; groundShadow.position.y = 0.003;
+scene.add(groundShadow);
+
+/* --- Végétation : touffes d'herbe, arbres boules et galets ----------------- */
+const nearMat = new THREE.MeshBasicMaterial({ color: 0x141416 });    // silhouettes proches
+/* Zones où se jouent les scènes : on n'y plante rien devant la caméra. */
+const STAGES = [[-2.5, 9.5], [13.5, 18.5], [21.5, 26], [40, 48.5], [56.5, 64]];
+const onStage = x => STAGES.some(([a, b]) => x > a && x < b);
+const tufts = [];
+{
+  const blade = new THREE.ConeGeometry(0.022, 1, 5); blade.translate(0, 0.5, 0);
+  const addTuft = (x, z, scale) => {
+    const tuft = new THREE.Group();
+    const n = 4 + Math.floor(rand(4));
+    for (let i = 0; i < n; i++) {
+      const b = new THREE.Mesh(blade, nearMat);
+      b.scale.set(scale, rand(0.25, 0.6) * scale, scale);
+      b.rotation.set(rand(-0.35, 0.35), 0, rand(-0.5, 0.5));
+      b.position.x = rand(-0.08, 0.08) * scale;
+      tuft.add(b);
+    }
+    tuft.position.set(x, groundHeight(x, z) - 0.02, z);
+    tuft.userData.phase = rand(TAU);
+    tufts.push(tuft); scene.add(tuft);
+  };
+  for (let x = -18; x < 82; x += rand(0.5, 1.6)) addTuft(x, rand(-7, -1.3), rand(0.7, 1.5));
+  for (let x = -18; x < 82; x += rand(1.2, 3.5)) if (!onStage(x)) addTuft(x, rand(1.5, 3.2), rand(0.9, 1.6));
+
+  // Arbres « sucette », en retrait derrière le chemin.
+  const trunkGeo = new THREE.CylinderGeometry(0.035, 0.06, 1, 8); trunkGeo.translate(0, 0.5, 0);
+  const ballGeo = new THREE.SphereGeometry(1, 24, 18);
+  for (let x = -16; x < 84; x += rand(6, 13)) {
+    const z = rand(-10, -4.5), h = rand(1.1, 2.0), tree = new THREE.Group();
+    const trunk = new THREE.Mesh(trunkGeo, nearMat); trunk.scale.y = h; trunk.castShadow = true;
+    const crown = new THREE.Mesh(ballGeo, nearMat); crown.scale.set(h * 0.3, h * 0.42, h * 0.3); crown.position.y = h; crown.castShadow = true;
+    tree.add(trunk, crown);
+    tree.position.set(x, groundHeight(x, z) - 0.05, z);
+    scene.add(tree);
+  }
+  // Galets ronds.
+  for (let i = 0; i < 26; i++) {
+    const x = rand(-16, 80), z = rand() < 0.75 ? rand(-6, -1.4) : rand(1.6, 3), r = rand(0.07, 0.22);
+    if (z > 0 && onStage(x)) continue;
+    const rock = new THREE.Mesh(ballGeo, nearMat); rock.scale.set(r * 1.4, r * 0.8, r);
+    rock.position.set(x, groundHeight(x, z) + r * 0.3, z); rock.castShadow = true;
+    scene.add(rock);
+  }
+}
+
+/* --- Poussières portées par le vent ---------------------------------------- */
+const MOTES = 140, motesGeo = new THREE.BufferGeometry();
+const motePos = new Float32Array(MOTES * 3), moteSeed = [];
+for (let i = 0; i < MOTES; i++) moteSeed.push({ x: rand(-12, 12), y: rand(-1, 5), z: rand(-8, 4), s: rand(0.3, 1), p: rand(TAU) });
+motesGeo.setAttribute('position', new THREE.BufferAttribute(motePos, 3));
+const motesMat = new THREE.PointsMaterial({ color: 0x222224, size: 0.05, map: softDot, transparent: true, opacity: 0.5, depthWrite: false });
+const motes = new THREE.Points(motesGeo, motesMat);
+motes.frustumCulled = false;
+scene.add(motes);
+
+/* --- Lumières --------------------------------------------------------------- */
+const hemi = new THREE.HemisphereLight(0xffffff, 0x8a8a8a, 1.2);
+const keyLight = new THREE.DirectionalLight(0xffffff, 2.6);   // contre-jour : dessine le contour du chaton
+keyLight.castShadow = true;
+keyLight.shadow.mapSize.set(2048, 2048);
+Object.assign(keyLight.shadow.camera, { left: -7, right: 7, top: 7, bottom: -7, near: 0.5, far: 30 });
+keyLight.shadow.bias = -0.0005; keyLight.shadow.radius = 5;
+const fillLight = new THREE.DirectionalLight(0xffffff, 0.7);  // débouche le visage côté caméra
+scene.add(hemi, keyLight, keyLight.target, fillLight, fillLight.target);
+
+/* ==========================================================================
+   4. HEURE DU JOUR : une seule valeur (0 = aube, 1 = nuit) pilote la palette
+   ========================================================================== */
+
+const PALETTE = [
+  //  t     haut du ciel  horizon   brume     encre     proche    sol       nuages  étoiles  clé   ambiance
+  { t: 0.00, top: 0xcdcdca, bot: 0xfafaf7, fog: 0xf2f2ef, ink: 0x8a8a8a, near: 0x1a1a1c, ground: 0xfcfcf9, cloud: 0.75, stars: 0, key: 2.4, hemi: 1.25 },
+  { t: 0.40, top: 0xdededb, bot: 0xffffff, fog: 0xf8f8f6, ink: 0x707072, near: 0x151517, ground: 0xf7f7f4, cloud: 0.85, stars: 0, key: 2.8, hemi: 1.35 },
+  { t: 0.74, top: 0x707072, bot: 0xcacac8, fog: 0xbcbcba, ink: 0x2a2a2c, near: 0x0b0b0c, ground: 0xb4b4b2, cloud: 0.35, stars: 0.15, key: 2.4, hemi: 0.95 },
+  { t: 1.00, top: 0x09090b, bot: 0x35353a, fog: 0x2d2d31, ink: 0x060607, near: 0x020203, ground: 0x66666b, cloud: 0.08, stars: 1, key: 3.4, hemi: 0.55 },
+];
+const world = { tod: 0, todGoal: 0, todRate: 0.2, moon: 0 };   // moon : 0 = soleil, 1 = lune levée
+const _c1 = new THREE.Color(), _c2 = new THREE.Color();
+const mixHex = (target, a, b, k) => target.copy(_c1.setHex(a)).lerp(_c2.setHex(b), k);
+
+function applyPalette() {
+  let i = 0;
+  while (i < PALETTE.length - 2 && world.tod > PALETTE[i + 1].t) i++;
+  const A = PALETTE[i], B = PALETTE[i + 1], k = clamp((world.tod - A.t) / (B.t - A.t), 0, 1);
+  mixHex(skyMat.uniforms.top.value, A.top, B.top, k);
+  mixHex(skyMat.uniforms.bottom.value, A.bot, B.bot, k);
+  mixHex(scene.fog.color, A.fog, B.fog, k);
+  mixHex(inkMat.color, A.ink, B.ink, k);
+  mixHex(nearMat.color, A.near, B.near, k);
+  mixHex(groundMat.color, A.ground, B.ground, k);
+  // Nuages : un blanc plus ou moins fondu dans la teinte du ciel.
+  cloudMat.color.copy(skyMat.uniforms.top.value).lerp(_c1.setHex(0xffffff), lerp(A.cloud, B.cloud, k));
+  starsMat.opacity = lerp(A.stars, B.stars, k);
+  keyLight.intensity = lerp(A.key, B.key, k);
+  hemi.intensity = lerp(A.hemi, B.hemi, k);
+  // Les poussières passent du sombre (sur fond clair) au clair (sur fond de nuit).
+  motesMat.color.setScalar(smooth(0.6, 0.9, world.tod) * 0.9 + 0.1);
+}
+
+/* ==========================================================================
+   5. CAMÉRA : suit le chaton, avec de légers travellings et un parallaxe souris
+   ========================================================================== */
+
+/* Réglages courants et réglages visés ; le récit ne modifie que `camGoal`. */
+const cam = { dist: 4.4, height: 0.55, az: 0.35, ahead: 0, lift: 0.4 };
+const camGoal = { ...cam };
+let camRate = 0.8;
+const camTarget = new THREE.Vector3(X_START, pathHeight(X_START) + 0.4, 0);
+const mouse = { x: 0, y: 0, sx: 0, sy: 0 };   // position brute et position lissée (-1..1)
+
+window.addEventListener('pointermove', e => {
+  mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+  mouse.y = (e.clientY / window.innerHeight) * 2 - 1;
+});
+
+/** Point que la caméra suit : remplacé plus bas par la position du chaton. */
+let focus = { x: X_START, y: pathHeight(X_START) };
+
+function updateCamera(dt, t, snap = false) {
+  const r = snap ? 1 : 0;
+  for (const k in cam) cam[k] = r ? camGoal[k] : damp(cam[k], camGoal[k], camRate, dt);
+  mouse.sx = damp(mouse.sx, mouse.x, 2.5, dt);
+  mouse.sy = damp(mouse.sy, mouse.y, 2.5, dt);
+
+  // La cible glisse vers le chaton avec un peu de retard : c'est le travelling.
+  const tx = focus.x + cam.ahead, ty = focus.y + cam.lift;
+  camTarget.x = r ? tx : damp(camTarget.x, tx, 2.2, dt);
+  camTarget.y = r ? ty : damp(camTarget.y, ty, 1.8, dt);
+
+  // En format portrait on recule pour garder le chaton et son décor dans le cadre.
+  const d = cam.dist * clamp(1.45 / camera.aspect, 1, 2.3);
+  // Lente respiration de l'angle + parallaxe doux piloté par la souris.
+  const az = cam.az + Math.sin(t * 0.11) * 0.05 + mouse.sx * 0.11;
+  camera.position.set(
+    camTarget.x + Math.sin(az) * d + mouse.sx * 0.3,
+    camTarget.y + cam.height + Math.sin(t * 0.17) * 0.05 - mouse.sy * 0.28,
+    Math.cos(az) * d);
+  camera.lookAt(camTarget.x - mouse.sx * 0.12, camTarget.y + mouse.sy * 0.06, 0);
+  camera.rotation.z += Math.sin(t * 0.13) * 0.004 + mouse.sx * 0.005;
+}
+
+/* ==========================================================================
+   6. MISE À JOUR DU DÉCOR
+   ========================================================================== */
+
+function updateWorld(dt, t) {
+  world.tod = damp(world.tod, world.todGoal, world.todRate, dt);
+  applyPalette();
+
+  // L'astre et les étoiles suivent la caméra : ils semblent infiniment loin.
+  const cx = camera.position.x;
+  const sunY = lerp(17, -8, smooth(0.1, 0.8, world.tod));      // le soleil descend au fil du jour
+  const moonY = lerp(-12, 13, easeInOut(world.moon));          // la lune se lève à la fin
+  const isMoon = world.moon > 0.01;
+  astro.position.set(cx * 0.96 + (isMoon ? 9 : -16), (isMoon ? moonY : sunY) + camTarget.y * 0.5, -105);
+  astro.scale.setScalar(isMoon ? 7.5 : 3.2);
+  stars.position.x = cx * 0.98;
+  starsMat.size = 2.2 + Math.sin(t * 1.3) * 0.25;
+
+  for (const c of clouds) {
+    const u = c.userData;
+    u.offset -= u.speed * dt; if (u.offset < -90) u.offset += 180;
+    c.position.x = cx * 0.94 + u.offset; c.position.y = u.y + camTarget.y * 0.4;
+  }
+
+  // L'herbe ondule sous le vent.
+  for (const tuft of tufts) tuft.rotation.z = Math.sin(t * 1.4 + tuft.userData.phase + tuft.position.x * 0.4) * 0.12 - 0.05;
+
+  // Les poussières dérivent dans un volume qui se replie autour de la caméra.
+  const wrap = (v, half) => ((v % (2 * half)) + 3 * half) % (2 * half) - half;
+  for (let i = 0; i < MOTES; i++) {
+    const m = moteSeed[i];
+    motePos[i * 3] = camTarget.x + wrap(m.x - t * 0.5 * m.s - camTarget.x, 12);
+    motePos[i * 3 + 1] = camTarget.y + m.y + Math.sin(t * 0.6 * m.s + m.p) * 0.35;
+    motePos[i * 3 + 2] = m.z;
+  }
+  motesGeo.attributes.position.needsUpdate = true;
+
+  // La lumière clé accompagne le chaton pour que son ombre reste nette.
+  const lx = lerp(-3, 3.5, world.moon);
+  keyLight.position.set(focus.x + lx, focus.y + 6, -4.5);
+  keyLight.target.position.set(focus.x, focus.y, 0);
+  fillLight.position.set(focus.x + 2, focus.y + 3, 8);
+  fillLight.target.position.set(focus.x, focus.y, 0);
+}
+
+/* [SUITE] */
+
+/* ==========================================================================
+   BOUCLE PRINCIPALE ET REDIMENSIONNEMENT
+   ========================================================================== */
+
+let time = 0;
+/** Avance toute la simulation de `dt` secondes. */
+function step(dt) {
+  time += dt;
+  updateCamera(dt, time);
+  updateWorld(dt, time);
+}
+
+function onResize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(w, h);
+}
+window.addEventListener('resize', onResize);
+
+const clock = new THREE.Clock();
+updateCamera(0, 0, true);
+renderer.setAnimationLoop(() => {
+  // dt borné : un onglet resté en arrière-plan ne provoque pas de saut.
+  step(Math.min(clock.getDelta(), 0.05) * SPEED);
+  renderer.render(scene, camera);
+});
+
+/* Petit accès de mise au point (console) : avancer le temps sans attendre. */
+window.__debug = { step, world, cam, camGoal, render: () => renderer.render(scene, camera) };
+</script>
+<script>
+  /* Si le module n'a pas pu se charger (pas de réseau), on l'explique. */
+  window.addEventListener('load', () => setTimeout(() => {
+    if (!window.__debug) document.getElementById('error').style.display = 'flex';
+  }, 4000));
+</script>
+</body>
+</html>
