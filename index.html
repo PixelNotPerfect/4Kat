@@ -506,6 +506,281 @@ function updateWorld(dt, t) {
   fillLight.target.position.set(focus.x, focus.y, 0);
 }
 
+/* ==========================================================================
+   7. LE CHATON
+   Modelé uniquement avec des volumes lisses (sphères, capsules, révolutions)
+   pour un rendu rond « à la Pixar ». Repère local : +Z = devant, +Y = haut.
+   La caméra voit donc son flanc droit (-X local) quand il marche vers +X.
+   ========================================================================== */
+
+const LEG = 0.315;   // longueur d'une patte, du pivot de la hanche jusqu'au sol
+
+function createKitten() {
+  /* --- Matières --- */
+  // Pelage noir : le « sheen » dépose un liseré velouté sur les contours.
+  const fur = new THREE.MeshPhysicalMaterial({ color: 0x0b0b0d, roughness: 0.82, sheen: 1, sheenRoughness: 0.5, sheenColor: new THREE.Color(0xb4b4bc) });
+  const earInner = new THREE.MeshStandardMaterial({ color: 0x34343a, roughness: 0.85 });
+  const white = new THREE.MeshStandardMaterial({ color: 0xf7f7f4, roughness: 0.7 });
+  const eyeMat = new THREE.MeshStandardMaterial({ color: 0xfbfbf8, roughness: 0.2, emissive: 0xffffff, emissiveIntensity: 0.12 });
+  const black = new THREE.MeshBasicMaterial({ color: 0x000000 });
+  const glintMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const noseMat = new THREE.MeshStandardMaterial({ color: 0x060606, roughness: 0.25 });
+
+  const unit = new THREE.SphereGeometry(1, 40, 28);
+  /** Ajoute une sphère étirée (ellipsoïde) à `parent`. */
+  const blob = (parent, mat, sx, sy, sz, x = 0, y = 0, z = 0, shadow = true) => {
+    const m = new THREE.Mesh(unit, mat);
+    m.scale.set(sx, sy, sz); m.position.set(x, y, z); m.castShadow = shadow;
+    parent.add(m); return m;
+  };
+
+  /* --- Hiérarchie : racine > inclinaison (pente) > cap > bassin --- */
+  const root = new THREE.Group(), tilt = new THREE.Group(), yawG = new THREE.Group(), hips = new THREE.Group();
+  root.add(tilt); tilt.add(yawG); yawG.add(hips);
+
+  /* --- Corps : trois volumes qui se fondent --- */
+  const body = blob(hips, fur, 0.2, 0.195, 0.34);
+  blob(hips, fur, 0.192, 0.19, 0.19, 0, 0.012, 0.15);    // poitrail
+  blob(hips, fur, 0.195, 0.188, 0.19, 0, 0, -0.14);        // croupe
+
+  /* --- Tête : grosse et ronde, comme chez tous les chatons --- */
+  const neck = new THREE.Group(); neck.position.set(0, 0.17, 0.27); hips.add(neck);
+  const head = new THREE.Group(); head.rotation.order = 'YXZ'; neck.add(head);
+  blob(head, fur, 0.25, 0.22, 0.225, 0, 0.07, 0.06);     // crâne
+  blob(head, fur, 0.1, 0.09, 0.1, 0.14, -0.01, 0.1);     // joues rebondies
+  blob(head, fur, 0.1, 0.09, 0.1, -0.14, -0.01, 0.1);
+
+  // La tache blanche du museau : deux babines, un menton.
+  blob(head, white, 0.062, 0.05, 0.05, 0.038, -0.035, 0.262, false);
+  blob(head, white, 0.062, 0.05, 0.05, -0.038, -0.035, 0.262, false);
+  blob(head, white, 0.045, 0.036, 0.04, 0, -0.072, 0.25, false);
+  const nose = blob(head, noseMat, 0.023, 0.015, 0.014, 0, -0.01, 0.314, false);
+  const mouth = blob(head, black, 0.016, 0.004, 0.02, 0, -0.064, 0.297, false);
+
+  // Moustaches : de fins traits blancs.
+  const whiskerGeo = new THREE.CylinderGeometry(0.0022, 0.0008, 0.2, 5); whiskerGeo.translate(0, 0.1, 0);
+  for (const s of [1, -1]) for (let i = -1; i <= 1; i++) {
+    const w = new THREE.Mesh(whiskerGeo, glintMat);
+    w.position.set(s * 0.075, -0.035 + i * 0.012, 0.275);
+    w.rotation.set(0.25, 0, -s * (PI / 2 - 0.12) + s * i * 0.24);
+    head.add(w);
+  }
+
+  // Yeux : grand globe clair, pupille ronde, petit reflet.
+  const eyes = [];
+  for (const s of [1, -1]) {
+    const eye = new THREE.Group(); eye.position.set(s * 0.1, 0.085, 0.248); eye.rotation.y = s * 0.28;
+    blob(eye, eyeMat, 0.068, 0.076, 0.04, 0, 0, 0, false);
+    const pupil = blob(eye, black, 0.04, 0.05, 0.012, 0, 0, 0.034, false);
+    blob(eye, glintMat, 0.013, 0.013, 0.006, 0.018, 0.026, 0.046, false);
+    head.add(eye); eyes.push({ eye, pupil, side: s });
+  }
+
+  // Oreilles : cônes à pointe arrondie (géométrie de révolution).
+  const earPts = [];
+  for (let i = 0; i <= 12; i++) { const k = i / 12; earPts.push(new THREE.Vector2(0.1 * Math.sqrt(1 - Math.pow(k, 1.7)) + 0.0001, 0.2 * k)); }
+  const earGeo = new THREE.LatheGeometry(earPts, 24);
+  const ears = [];
+  for (const s of [1, -1]) {
+    const ear = new THREE.Group(); ear.position.set(s * 0.135, 0.215, 0.04);
+    const outer = new THREE.Mesh(earGeo, fur); outer.scale.set(1, 1, 0.55); outer.castShadow = true;
+    const inner = new THREE.Mesh(earGeo, earInner); inner.scale.set(0.68, 0.74, 0.3); inner.position.set(0, 0.012, 0.035);
+    ear.add(outer, inner); head.add(ear); ears.push({ ear, side: s, flick: 0 });
+  }
+
+  /* --- Pattes : une capsule et un coussinet, pivot à la hanche --- */
+  const legGeo = new THREE.CapsuleGeometry(0.064, 0.15, 6, 16); legGeo.translate(0, -0.135, 0);
+  const legs = [];
+  // Ordre : avant côté caméra, avant côté opposé, arrière côté caméra, arrière côté opposé.
+  for (const [x, z] of [[-0.11, 0.2], [0.11, 0.2], [-0.12, -0.2], [0.12, -0.2]]) {
+    const leg = new THREE.Group(); leg.position.set(x, -0.045, z);
+    const m = new THREE.Mesh(legGeo, fur); m.castShadow = true; leg.add(m);
+    blob(leg, fur, 0.07, 0.046, 0.086, 0, -0.269, 0.026);
+    hips.add(leg); legs.push(leg);
+  }
+
+  /* --- Queue : une chaîne d'articulations habillée d'un tube lisse ---
+     Les articulations ne portent aucun maillage : à chaque image, on tend
+     autour d'elles un tube (anneaux de sommets) terminé par un bout arrondi. */
+  const tail = [];
+  let parent = hips;
+  const TAIL = 18, RAD = 12, CAP = 4, RINGS = TAIL + CAP;
+  for (let i = 0; i < TAIL; i++) {
+    const joint = new THREE.Group();
+    joint.position.set(0, i ? 0.033 : 0.09, i ? 0 : -0.3);
+    parent.add(joint); tail.push({ joint, r: lerp(0.047, 0.034, i / (TAIL - 1)) }); parent = joint;
+  }
+  const tailGeo = new THREE.BufferGeometry();
+  const tailPos = new Float32Array(RINGS * RAD * 3), tailNor = new Float32Array(RINGS * RAD * 3), tailIdx = [];
+  for (let r = 0; r < RINGS - 1; r++) for (let j = 0; j < RAD; j++) {
+    const a = r * RAD + j, b = r * RAD + (j + 1) % RAD, c = a + RAD, d = b + RAD;
+    tailIdx.push(a, c, b, b, c, d);
+  }
+  tailGeo.setAttribute('position', new THREE.BufferAttribute(tailPos, 3));
+  tailGeo.setAttribute('normal', new THREE.BufferAttribute(tailNor, 3));
+  tailGeo.setIndex(tailIdx);
+  const tailMesh = new THREE.Mesh(tailGeo, fur);
+  tailMesh.castShadow = true; tailMesh.frustumCulled = false;
+  root.userData.tailMesh = tailMesh;     // ajouté à la scène : ses sommets sont en coordonnées monde
+  const _c = new THREE.Vector3(), _q = new THREE.Vector3();
+  function skinTail(fluff) {
+    root.updateMatrixWorld(true);
+    for (let r = 0; r < RINGS; r++) {
+      const i = Math.min(r, TAIL - 1), m = tail[i].joint.matrixWorld;
+      const th = r < TAIL ? 0 : (r - TAIL + 1) / CAP * PI / 2;      // anneaux du bout : une demi-sphère
+      const rad = tail[i].r * (1 + 0.9 * fluff), ring = rad * Math.cos(th), up = rad * Math.sin(th);
+      _c.set(0, 0, 0).applyMatrix4(m);
+      for (let j = 0; j < RAD; j++) {
+        const a = j / RAD * TAU, o = (r * RAD + j) * 3;
+        _q.set(ring * Math.cos(a), up, ring * Math.sin(a)).applyMatrix4(m);
+        tailPos[o] = _q.x; tailPos[o + 1] = _q.y; tailPos[o + 2] = _q.z;
+        _q.sub(_c).normalize();
+        tailNor[o] = _q.x; tailNor[o + 1] = _q.y; tailNor[o + 2] = _q.z;
+      }
+    }
+    tailGeo.attributes.position.needsUpdate = true; tailGeo.attributes.normal.needsUpdate = true;
+  }
+
+  /* --- Canaux d'animation --------------------------------------------------
+     `g` contient les valeurs visées par le récit, `p` les valeurs courantes
+     qui les rejoignent en douceur : toutes les poses se mélangent ainsi
+     naturellement, sans clé d'animation. */
+  const defaults = {
+    yaw: PI / 2,                       // cap (PI/2 = face à +X, 0 = face à la caméra)
+    z: 0, jump: 0,                     // écart latéral, hauteur de saut
+    sit: 0, lie: 0, crouch: 0, stretch: 0, tuck: 0, air: 0,   // poses du corps (0..1)
+    roll: 0, spin: 0, squash: 1,       // tonneau, culbute, écrasement
+    headYaw: 0, headPitch: 0, headRoll: 0,
+    eyeOpen: 1, pupil: 1, gazeX: 0, gazeY: 0, cross: 0,       // regard (cross = loucher)
+    earBack: 0, mouth: 0,
+    tailUp: 0.4, tailWag: 0.3, tailWrap: 0, tailFluff: 0,
+    paw: 0, wiggle: 0, run: 0,
+  };
+  const K = {
+    root, hips, head, nose, x: 0, prevX: 0, phase: 0, move: 0,
+    p: { ...defaults }, g: { ...defaults }, defaults,
+    rate: 7, lookTarget: null, lid: 1, blink: 0, blinkT: 2, flickT: 3, onStep: null,
+  };
+  /** Fixe des poses visées (transition douce). */
+  K.set = o => Object.assign(K.g, o);
+  /** Impose des valeurs immédiatement, sans transition. */
+  K.snap = o => { Object.assign(K.g, o); Object.assign(K.p, o); };
+  /** Revient à la pose neutre (debout), en gardant position et cap. */
+  K.neutral = (extra = {}) => K.set({ ...defaults, yaw: K.g.yaw, z: K.g.z, ...extra });
+
+  const _v = new THREE.Vector3();
+  K.nosePosition = out => nose.getWorldPosition(out);
+
+  K.update = (dt, t) => {
+    const p = K.p, g = K.g;
+
+    /* Suivi du regard : la tête se tourne vers un point du monde. */
+    if (K.lookTarget) {
+      yawG.worldToLocal(_v.copy(K.lookTarget));
+      _v.y -= hips.position.y + 0.26; _v.z -= 0.22;
+      g.headYaw = clamp(Math.atan2(_v.x, _v.z), -1.3, 1.3);
+      g.headPitch = clamp(-Math.atan2(_v.y, Math.hypot(_v.x, _v.z)), -0.8, 0.7);
+    }
+    for (const k in g) p[k] = damp(p[k], g[k], K.rate, dt);
+
+    /* Déplacement : la phase de marche avance avec la distance parcourue. */
+    const dx = K.x - K.prevX; K.prevX = K.x;
+    const speed = dt > 0 ? Math.abs(dx) / dt : 0;
+    const grounded = p.jump < 0.03 && p.tuck < 0.3;
+    K.move = damp(K.move, speed > 0.08 && grounded ? 1 : 0, 9, dt);
+    const before = Math.floor(K.phase / PI);
+    K.phase += Math.abs(dx) / lerp(0.5, 1.2, p.run) * TAU;
+    if (K.onStep && K.move > 0.5 && Math.floor(K.phase / PI) !== before) K.onStep(p.run);
+
+    root.position.set(K.x, groundHeight(K.x, p.z) + p.jump, p.z);
+    tilt.rotation.z = Math.atan(pathSlope(K.x)) * 0.8 * (1 - p.lie * 0.6);
+    yawG.rotation.y = p.yaw;
+
+    /* Bassin : hauteur et tangage selon la pose, plus le rebond de l'allure. */
+    let hipY = 0.36 - 0.01 * p.sit - 0.09 * p.crouch - 0.04 * p.stretch;
+    let pitch = -0.62 * p.sit + 0.22 * p.crouch + 0.4 * p.stretch;      // négatif = nez vers le haut
+    hipY = lerp(hipY, 0.175, p.lie); pitch *= 1 - p.lie;
+    hipY = lerp(hipY, 0.23, Math.max(p.tuck, p.air));
+    hipY += lerp(Math.abs(Math.sin(K.phase)) * 0.018, Math.max(0, Math.sin(K.phase + 0.6)) * 0.1, p.run) * K.move;
+    pitch += Math.sin(K.phase + 1.2) * 0.13 * p.run * K.move;            // tangage du galop
+    const wig = Math.sin(t * 15) * p.wiggle;                             // dandinement avant le bond
+    hips.position.set(-wig * 0.012, hipY * lerp(1, p.squash, 0.7) + Math.sin(t * 2.1) * 0.004, 0);
+    hips.rotation.set(pitch + p.spin, wig * 0.17, p.roll + 0.22 * p.lie);
+    const sq = p.squash, inv = 1 / Math.sqrt(sq);
+    hips.scale.set(inv, sq, inv);
+    const breath = 1 + Math.sin(t * lerp(2.4, 1.3, p.lie)) * 0.022;
+    body.scale.set(0.2 * breath, 0.195 * breath, 0.34);
+
+    /* Pattes : chaque patte reçoit un angle « monde » puis s'allonge juste
+       assez pour toucher le sol (une cinématique inverse très simplifiée). */
+    for (let i = 0; i < 4; i++) {
+      const front = i < 2, leg = legs[i];
+      const phW = K.phase + (i === 0 || i === 3 ? 0 : PI);                 // pas : diagonales alternées
+      const phR = K.phase + (front ? 0 : PI * 0.85) + (i % 2) * 0.45;      // galop : avant puis arrière
+      let a = lerp(Math.sin(phW) * 0.5, Math.sin(phR) * 0.95, p.run) * K.move;
+      const lift = lerp(Math.max(0, -Math.cos(phW)), Math.max(0, -Math.cos(phR)), p.run) * K.move;
+      let plant = 1, len = 1;
+      a += front ? -0.3 * p.crouch - 0.95 * p.stretch : 0.15 * p.stretch;
+      if (!front) { a = lerp(a, -1.3, p.sit); plant *= 1 - p.sit; len = lerp(len, 0.9, p.sit); }   // assis : pattes arrière repliées
+      a = lerp(a, front ? -1.35 : -1.25, p.lie); plant *= 1 - p.lie; len = lerp(len, 0.55, p.lie);
+      a = lerp(a, front ? 0.7 : -0.7, p.tuck); plant *= 1 - p.tuck; len = lerp(len, 0.6, p.tuck);   // en boule
+      a = lerp(a, Math.sin(t * 10 + i * 1.9) * 0.55 + (front ? -0.3 : 0.3), p.air); plant *= 1 - p.air;   // sur le dos, pattes en l'air
+      if (i === 0) { a = lerp(a, -1.45, p.paw); plant *= 1 - p.paw; len = lerp(len, 1.15, p.paw); }  // patte tendue
+      const flying = clamp(p.jump * 5, 0, 1) * (1 - p.tuck) * (1 - p.air);
+      a = lerp(a, front ? -0.85 : 0.85, flying); plant *= 1 - flying;      // en plein saut : pattes écartées
+      const pivotY = hipY + leg.position.y * Math.cos(pitch) - leg.position.z * Math.sin(pitch);
+      const planted = clamp(pivotY / Math.max(0.4, Math.cos(a)) / LEG, 0.5, 1.45);
+      leg.rotation.x = a - pitch;
+      leg.scale.y = lerp(len, planted, plant) * (1 - lift * 0.28);
+    }
+
+    /* Tête : compense le tangage du corps pour rester à l'horizontale. */
+    neck.position.y = 0.17 - 0.1 * p.lie;
+    neck.rotation.x = -pitch * 0.92;
+    const bob = Math.sin(K.phase * 2 + 0.5) * 0.025 * K.move;
+    head.rotation.set(p.headPitch + bob + 0.05 * p.lie, p.headYaw, p.headRoll);
+
+    /* Yeux : clignements spontanés, pupilles, regard (qui suit un peu la souris). */
+    K.blinkT -= dt;
+    if (K.blinkT < 0) { K.blink = 0.13; K.blinkT = 1.6 + Math.random() * 3.6; }
+    K.blink = Math.max(0, K.blink - dt);
+    K.lid = damp(K.lid, K.blink > 0 ? 0.06 : 1, 38, dt);
+    const open = Math.max(0.055, p.eyeOpen * K.lid);
+    const gx = p.gazeX + mouse.sx * Math.cos(p.yaw + p.headYaw) * 0.5, gy = p.gazeY - mouse.sy * 0.35;
+    for (const e of eyes) {
+      e.eye.scale.y = open;
+      e.eye.rotation.z = -e.side * 0.3 * (1 - open);   // paupière close : un petit arc paisible
+      e.pupil.scale.set(0.04 * p.pupil, 0.05 * p.pupil, 0.012);
+      e.pupil.position.x = clamp(gx * 0.022 - e.side * p.cross * 0.03, -0.032, 0.032);
+      e.pupil.position.y = clamp(gy * 0.02, -0.026, 0.026);
+    }
+    eyeMat.emissiveIntensity = 0.12 + 0.6 * smooth(0.6, 1, world.tod);   // les yeux luisent la nuit
+
+    /* Oreilles : se couchent sous l'émotion, tressaillent de temps en temps. */
+    K.flickT -= dt;
+    if (K.flickT < 0) { ears[Math.random() < 0.5 ? 0 : 1].flick = 1; K.flickT = 2 + Math.random() * 5; }
+    for (const e of ears) {
+      e.flick = Math.max(0, e.flick - dt * 4.5);
+      const f = Math.sin(e.flick * PI * 2) * e.flick * 0.35;
+      e.ear.rotation.set(-0.75 * p.earBack, 0, -e.side * (0.3 + 0.4 * p.earBack + f));
+    }
+    mouth.scale.set(0.016 + 0.008 * p.mouth, 0.004 + 0.034 * p.mouth, 0.02);
+
+    /* Queue : une onde parcourt la chaîne d'articulations. */
+    tail[0].joint.rotation.x = lerp(-2.0, -0.35, (p.tailUp + 1) / 2) - pitch * 0.8;
+    for (let i = 1; i < tail.length; i++) {
+      const j = tail[i].joint;
+      j.rotation.x = 0.068 * p.tailUp + Math.sin(t * 2.2 - i * 0.37) * 0.05 * (1 - p.lie);
+      j.rotation.z = Math.sin(t * (1.6 + 4 * p.wiggle) - i * 0.33) * p.tailWag * 0.15 + p.tailWrap * 0.2;
+    }
+    skinTail(p.tailFluff);   // tailFluff : la queue en écouvillon des grandes frayeurs
+  };
+  return K;
+}
+
+const K = createKitten();
+scene.add(K.root, K.root.userData.tailMesh);
+
 /* [SUITE] */
 
 /* ==========================================================================
@@ -516,6 +791,8 @@ let time = 0;
 /** Avance toute la simulation de `dt` secondes. */
 function step(dt) {
   time += dt;
+  K.update(dt, time);
+  focus.x = K.x; focus.y = groundHeight(K.x, K.p.z) + K.p.jump * 0.35;
   updateCamera(dt, time);
   updateWorld(dt, time);
 }
@@ -538,7 +815,7 @@ renderer.setAnimationLoop(() => {
 });
 
 /* Petit accès de mise au point (console) : avancer le temps sans attendre. */
-window.__debug = { step, world, cam, camGoal, render: () => renderer.render(scene, camera) };
+window.__debug = { step, world, cam, camGoal, K, render: () => renderer.render(scene, camera) };
 </script>
 <script>
   /* Si le module n'a pas pu se charger (pas de réseau), on l'explique. */
