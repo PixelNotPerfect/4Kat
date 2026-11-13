@@ -132,6 +132,7 @@ function seeded(seed) {
 const rnd = seeded(20261113);
 const rand = (a = 1, b) => (b === undefined ? rnd() * a : a + rnd() * (b - a));
 
+let time = 0;            // horloge de la simulation, en secondes
 const params = new URLSearchParams(location.search);
 const SPEED = clamp(parseFloat(params.get('speed')) || 1, 0.1, 20);
 const START_SCENE = clamp(parseInt(params.get('scene')) || 1, 1, 5);
@@ -166,9 +167,9 @@ const X_YARN = 23.3;      // la pelote, juste avant la pente
 const X_MOON = 59.5;      // le promontoire final
 
 /** Grandes ondulations du parcours : une descente, puis la montée finale. */
-const pathTrend = x => -2.2 * smooth(24, 43, x) + 1.8 * smooth(46, 58, x);
+const pathTrend = x => -2.2 * smooth(22, 43, x) + 1.8 * smooth(46, 58, x);
 /** Hauteur du chemin (z = 0) : la tendance plus de petites bosses. */
-const pathHeight = x => pathTrend(x) + 0.2 * Math.sin(x * 0.21 + 2.0) + 0.08 * Math.sin(x * 0.53 + 0.7);
+const pathHeight = x => pathTrend(x) + 0.2 * Math.sin(x * 0.21 + 2.96) + 0.08 * Math.sin(x * 0.53 + 1.79);   // phases choisies pour que la pelote attende sur une bosse
 /** Pente du chemin (dérivée numérique). */
 const pathSlope = x => (pathHeight(x + 0.05) - pathHeight(x - 0.05)) / 0.1;
 /** Hauteur du sol en tout point : une crête qui retombe de part et d'autre. */
@@ -258,8 +259,8 @@ const LAYERS = [
   { z: -16, base: 0.2, amp: 0.8, freq: 0.110, follow: 0.85, peaks: 0 },
   { z: -27, base: 1.3, amp: 1.3, freq: 0.071, follow: 0.6, peaks: 0 },
   { z: -42, base: 2.9, amp: 2.0, freq: 0.047, follow: 0.35, peaks: 0.5 },
-  { z: -62, base: 5.0, amp: 3.2, freq: 0.031, follow: 0.15, peaks: 1 },
-  { z: -90, base: 8.0, amp: 5.5, freq: 0.019, follow: 0, peaks: 1 },
+  { z: -62, base: 4.2, amp: 2.8, freq: 0.031, follow: 0.15, peaks: 1 },
+  { z: -90, base: 6.0, amp: 4.5, freq: 0.019, follow: 0, peaks: 1 },
 ];
 /** Profil d'un plan : dunes arrondies au premier plan, crêtes pointues au loin. */
 function layerHeight(L, i, x) {
@@ -285,8 +286,8 @@ LAYERS.forEach((L, i) => {
   const trunk = new THREE.PlaneGeometry(1, 1), crown = new THREE.CircleGeometry(1, 28);
   for (let li = 0; li < 2; li++) {
     const L = LAYERS[li];
-    for (let x = -40; x < 110; x += rand(3.5, 10)) {
-      const h = rand(1.2, 2.6) * (1 + li * 0.5), y = layerHeight(L, li, x), z = L.z + 0.05;
+    for (let x = -40; x < 110; x += rand(7, 22)) {
+      const h = rand(1.0, 2.1) * (1 + li * 0.5), y = layerHeight(L, li, x), z = L.z + 0.05;
       const t = new THREE.Mesh(trunk, inkMat); t.scale.set(0.07 * (1 + li), h, 1); t.position.set(x, y + h / 2 - 0.1, z);
       const c = new THREE.Mesh(crown, inkMat); c.scale.set(h * rand(0.28, 0.4), h * rand(0.42, 0.6), 1); c.position.set(x, y + h, z);
       scene.add(t, c);
@@ -391,12 +392,12 @@ scene.add(hemi, keyLight, keyLight.target, fillLight, fillLight.target);
 
 const PALETTE = [
   //  t     haut du ciel  horizon   brume     encre     proche    sol       nuages  étoiles  clé   ambiance
-  { t: 0.00, top: 0xcdcdca, bot: 0xfafaf7, fog: 0xf2f2ef, ink: 0x8a8a8a, near: 0x1a1a1c, ground: 0xfcfcf9, cloud: 0.75, stars: 0, key: 2.4, hemi: 1.25 },
-  { t: 0.40, top: 0xdededb, bot: 0xffffff, fog: 0xf8f8f6, ink: 0x707072, near: 0x151517, ground: 0xf7f7f4, cloud: 0.85, stars: 0, key: 2.8, hemi: 1.35 },
+  { t: 0.00, top: 0xcdcdca, bot: 0xfafaf7, fog: 0xf2f2ef, ink: 0x9a9a9a, near: 0x1a1a1c, ground: 0xfcfcf9, cloud: 0.75, stars: 0, key: 2.4, hemi: 1.25 },
+  { t: 0.40, top: 0xdededb, bot: 0xffffff, fog: 0xf8f8f6, ink: 0x808082, near: 0x151517, ground: 0xf7f7f4, cloud: 0.85, stars: 0, key: 2.8, hemi: 1.35 },
   { t: 0.74, top: 0x707072, bot: 0xcacac8, fog: 0xbcbcba, ink: 0x2a2a2c, near: 0x0b0b0c, ground: 0xb4b4b2, cloud: 0.35, stars: 0.15, key: 2.4, hemi: 0.95 },
   { t: 1.00, top: 0x09090b, bot: 0x35353a, fog: 0x2d2d31, ink: 0x060607, near: 0x020203, ground: 0x66666b, cloud: 0.08, stars: 1, key: 3.4, hemi: 0.55 },
 ];
-const world = { tod: 0, todGoal: 0, todRate: 0.2, moon: 0 };   // moon : 0 = soleil, 1 = lune levée
+const world = { tod: 0, todGoal: 0, todRate: 0.2, moon: 0, shake: 0 };   // moon : 0 = soleil, 1 = lune levée
 const _c1 = new THREE.Color(), _c2 = new THREE.Color();
 const mixHex = (target, a, b, k) => target.copy(_c1.setHex(a)).lerp(_c2.setHex(b), k);
 
@@ -424,7 +425,7 @@ function applyPalette() {
    ========================================================================== */
 
 /* Réglages courants et réglages visés ; le récit ne modifie que `camGoal`. */
-const cam = { dist: 4.4, height: 0.55, az: 0.35, ahead: 0, lift: 0.4 };
+const cam = { dist: 4.4, height: 0.3, az: 0.35, ahead: 0, lift: 0.6 };
 const camGoal = { ...cam };
 let camRate = 0.8;
 const camTarget = new THREE.Vector3(X_START, pathHeight(X_START) + 0.4, 0);
@@ -459,6 +460,9 @@ function updateCamera(dt, t, snap = false) {
     Math.cos(az) * d);
   camera.lookAt(camTarget.x - mouse.sx * 0.12, camTarget.y + mouse.sy * 0.06, 0);
   camera.rotation.z += Math.sin(t * 0.13) * 0.004 + mouse.sx * 0.005;
+  // Petite secousse lors des chocs (le vase, les atterrissages ratés).
+  world.shake = damp(world.shake, 0, 7, dt);
+  camera.position.y += Math.sin(t * 73) * world.shake;
 }
 
 /* ==========================================================================
@@ -472,9 +476,9 @@ function updateWorld(dt, t) {
   // L'astre et les étoiles suivent la caméra : ils semblent infiniment loin.
   const cx = camera.position.x;
   const sunY = lerp(17, -8, smooth(0.1, 0.8, world.tod));      // le soleil descend au fil du jour
-  const moonY = lerp(-12, 13, easeInOut(world.moon));          // la lune se lève à la fin
+  const moonY = lerp(-12, 15, easeInOut(world.moon));          // la lune se lève à la fin
   const isMoon = world.moon > 0.01;
-  astro.position.set(cx * 0.96 + (isMoon ? 9 : -16), (isMoon ? moonY : sunY) + camTarget.y * 0.5, -105);
+  astro.position.set(cx * 0.96 + (isMoon ? 30 : -16), (isMoon ? moonY : sunY) + camTarget.y * 0.5, -105);
   astro.scale.setScalar(isMoon ? 7.5 : 3.2);
   stars.position.x = cx * 0.98;
   starsMat.size = 2.2 + Math.sin(t * 1.3) * 0.25;
@@ -669,7 +673,8 @@ function createKitten() {
   K.neutral = (extra = {}) => K.set({ ...defaults, yaw: K.g.yaw, z: K.g.z, ...extra });
 
   const _v = new THREE.Vector3();
-  K.nosePosition = out => nose.getWorldPosition(out);
+  /** Position monde du bout du nez, décalée de `d` vers l'avant et de `up` vers le haut. */
+  K.nosePosition = (out, d = 0, up = 0) => { nose.getWorldDirection(_v); nose.getWorldPosition(out).addScaledVector(_v, d); out.y += up; return out; };
 
   K.update = (dt, t) => {
     const p = K.p, g = K.g;
@@ -700,7 +705,7 @@ function createKitten() {
     let hipY = 0.36 - 0.01 * p.sit - 0.09 * p.crouch - 0.04 * p.stretch;
     let pitch = -0.62 * p.sit + 0.22 * p.crouch + 0.4 * p.stretch;      // négatif = nez vers le haut
     hipY = lerp(hipY, 0.175, p.lie); pitch *= 1 - p.lie;
-    hipY = lerp(hipY, 0.23, Math.max(p.tuck, p.air));
+    hipY = lerp(hipY, 0.23, p.tuck); hipY = lerp(hipY, 0.27, p.air);
     hipY += lerp(Math.abs(Math.sin(K.phase)) * 0.018, Math.max(0, Math.sin(K.phase + 0.6)) * 0.1, p.run) * K.move;
     pitch += Math.sin(K.phase + 1.2) * 0.13 * p.run * K.move;            // tangage du galop
     const wig = Math.sin(t * 15) * p.wiggle;                             // dandinement avant le bond
@@ -735,10 +740,10 @@ function createKitten() {
     }
 
     /* Tête : compense le tangage du corps pour rester à l'horizontale. */
-    neck.position.y = 0.17 - 0.1 * p.lie;
+    neck.position.y = 0.17 - 0.1 * p.lie - 0.09 * p.air;
     neck.rotation.x = -pitch * 0.92;
     const bob = Math.sin(K.phase * 2 + 0.5) * 0.025 * K.move;
-    head.rotation.set(p.headPitch + bob + 0.05 * p.lie, p.headYaw, p.headRoll);
+    head.rotation.set(p.headPitch + bob + 0.05 * p.lie, p.headYaw, p.headRoll - p.roll * 0.35 * p.air);   // sur le dos, la tête se redresse un peu
 
     /* Yeux : clignements spontanés, pupilles, regard (qui suit un peu la souris). */
     K.blinkT -= dt;
@@ -781,17 +786,588 @@ function createKitten() {
 const K = createKitten();
 scene.add(K.root, K.root.userData.tailMesh);
 
-/* [SUITE] */
+/* ==========================================================================
+   8. PETITS SIGNES : cœurs, « z », « ? », « ! », notes, étoiles, poussière
+   Des sprites dessinés au canvas, tirés d'une réserve et recyclés.
+   ========================================================================== */
+
+const CORAL = 0xff5d73;   // accent n° 1 : le papillon et les cœurs
+const GOLD = 0xffcf5c;    // accent n° 2 : les lucioles
+
+const glyph = ch => canvasTexture(128, g => {
+  g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.font = 'italic 104px Georgia, "Times New Roman", serif'; g.fillText(ch, 64, 68);
+});
+const GLYPHS = {
+  z: glyph('z'), what: glyph('?'), bang: glyph('!'), dust: softDot,
+  heart: canvasTexture(128, g => {
+    g.fillStyle = '#fff'; g.beginPath(); g.moveTo(64, 110);
+    g.bezierCurveTo(-6, 62, 22, 8, 64, 42); g.bezierCurveTo(106, 8, 134, 62, 64, 110); g.fill();
+  }),
+  note: canvasTexture(128, g => {
+    g.fillStyle = g.strokeStyle = '#fff'; g.lineWidth = 7; g.lineCap = 'round';
+    g.beginPath(); g.ellipse(48, 96, 19, 14, -0.4, 0, TAU); g.fill();
+    g.beginPath(); g.moveTo(64, 92); g.lineTo(64, 22); g.quadraticCurveTo(84, 30, 92, 56); g.stroke();
+  }),
+  star: canvasTexture(128, g => {
+    g.fillStyle = '#fff'; g.beginPath();
+    for (let i = 0; i < 8; i++) { const r = i % 2 ? 14 : 58, a = i * PI / 4; g.lineTo(64 + Math.sin(a) * r, 64 - Math.cos(a) * r); }
+    g.fill();
+  }),
+};
+
+const emotes = [];
+for (let i = 0; i < 56; i++) {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthWrite: false, fog: false }));
+  s.visible = false; s.renderOrder = 5; scene.add(s); emotes.push({ sprite: s, life: 0 });
+}
+/** Couleur des signes : encre sombre le jour, blanc la nuit. */
+const inkNow = () => (world.tod < 0.62 ? 0x18181a : 0xf4f4f4);
+
+/** Fait apparaître un signe. o : { color, size, life, vx, vy, sway, grow } */
+function emote(type, x, y, z, o = {}) {
+  const e = emotes.find(e => e.life <= 0); if (!e) return;
+  Object.assign(e, { life: o.life || 1.6, age: 0, total: o.life || 1.6, size: o.size || 0.24, vx: o.vx || 0, vy: o.vy ?? 0.35, sway: o.sway || 0, grow: o.grow || 0, phase: Math.random() * TAU });
+  e.sprite.material.map = GLYPHS[type]; e.sprite.material.color.setHex(o.color ?? inkNow());
+  e.sprite.material.rotation = o.tilt || 0;
+  e.sprite.position.set(x, y, z); e.sprite.visible = true;
+}
+function updateEmotes(dt, t) {
+  for (const e of emotes) {
+    if (e.life <= 0) continue;
+    e.life -= dt; e.age += dt;
+    if (e.life <= 0) { e.sprite.visible = false; continue; }
+    e.sprite.position.x += (e.vx + Math.sin(t * 3 + e.phase) * e.sway) * dt;
+    e.sprite.position.y += e.vy * dt;
+    e.sprite.scale.setScalar(e.size * easeOut(Math.min(1, e.age * 5)) * (1 + e.grow * e.age));
+    e.sprite.material.opacity = Math.min(1, e.life / (e.total * 0.4));
+  }
+}
+/** Un point juste au-dessus de la tête du chaton. */
+const overHead = (dy = 0) => [K.x + 0.2, K.root.position.y + 1.0 + 0.12 * K.p.sit - 0.5 * K.p.lie + dy, K.p.z + 0.1];
+const puff = (x, z = 0, n = 5) => {
+  for (let i = 0; i < n; i++) emote('dust', x + (Math.random() - 0.5) * 0.4, groundHeight(x, z) + 0.08, z + 0.15, {
+    color: 0xa8a8a6, size: 0.3, life: 0.8, vx: (Math.random() - 0.5) * 0.8, vy: 0.25 + Math.random() * 0.3, grow: 1.6 });
+};
+
+/* ==========================================================================
+   9. ACCESSOIRES DU RÉCIT : papillon, vase, pelote, lucioles, étoile filante
+   ========================================================================== */
+
+const _goal = new THREE.Vector3();
+
+/* --- Le papillon (corail) --------------------------------------------------- */
+const B = (() => {
+  const group = new THREE.Group(); group.visible = false; group.rotation.order = 'YXZ';
+  const mat = new THREE.MeshBasicMaterial({ color: CORAL, side: THREE.DoubleSide, fog: false });
+  const disc = new THREE.CircleGeometry(1, 20); disc.rotateX(-PI / 2);     // les ailes sont à plat
+  const wings = [];
+  for (const s of [1, -1]) {
+    const wing = new THREE.Group();
+    const a = new THREE.Mesh(disc, mat); a.scale.set(0.075, 1, 0.062); a.position.set(s * 0.078, 0, 0.03);
+    const b = new THREE.Mesh(disc, mat); b.scale.set(0.05, 1, 0.046); b.position.set(s * 0.055, 0, -0.045);
+    wing.add(a, b); group.add(wing); wings.push(wing);
+  }
+  const bodyGeo = new THREE.CapsuleGeometry(0.009, 0.08, 4, 8); bodyGeo.rotateX(PI / 2);
+  group.add(new THREE.Mesh(bodyGeo, new THREE.MeshBasicMaterial({ color: 0x111113, fog: false })));
+  scene.add(group);
+  const B = { group, pos: new THREE.Vector3(), aim: null, flutter: 1, perch: false, rate: 2.2 };
+  B.appear = (x, y, z) => { B.pos.set(x, y, z); group.position.copy(B.pos); group.visible = true; B.flutter = 1; B.perch = false; };
+  B.hide = () => { group.visible = false; B.aim = null; };
+  B.update = (dt, t) => {
+    if (!group.visible) return;
+    if (B.aim) B.aim(_goal);
+    const dist = B.pos.distanceTo(_goal);
+    B.pos.lerp(_goal, 1 - Math.exp(-(B.perch ? 4.5 : B.rate) * dt));
+    const settled = B.perch ? 1 - smooth(0.03, 0.4, dist) : 0;    // posé : il ne volette plus
+    const f = B.flutter * (1 - settled);
+    group.position.set(B.pos.x + Math.sin(t * 5.3) * 0.09 * f, B.pos.y + Math.sin(t * 7.7) * 0.07 * f, B.pos.z + Math.cos(t * 4.1) * 0.08 * f);
+    const flap = lerp(Math.abs(Math.sin(t * 21)) * 1.5 - 0.25, 0.75 + Math.sin(t * 3.2) * 0.45, settled);
+    wings[0].rotation.z = flap; wings[1].rotation.z = -flap;
+    group.rotation.set(-0.35, PI / 2 + Math.sin(t * 1.3) * 0.6 * f + 0.5, 0);
+  };
+  return B;
+})();
+
+/* --- Le vase sur son socle --------------------------------------------------- */
+const V = (() => {
+  const base = new THREE.Group(); base.position.set(X_VASE, groundHeight(X_VASE, 0) - 0.02, 0); scene.add(base);
+  const stone = new THREE.MeshStandardMaterial({ color: 0xd9d9d5, roughness: 0.95 });
+  const ceramic = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.28, side: THREE.DoubleSide });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x111113, roughness: 0.6 });
+  const cyl = (rt, rb, h, y) => { const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, 36), stone); m.position.y = y; m.castShadow = true; base.add(m); };
+  cyl(0.17, 0.185, 0.05, 0.025); cyl(0.115, 0.13, 0.3, 0.2); cyl(0.175, 0.14, 0.05, 0.375);
+  const TOP = 0.4;
+
+  // Profil du vase, tourné autour de son axe.
+  const profile = new THREE.SplineCurve([[0.001, 0], [0.07, 0.004], [0.115, 0.07], [0.12, 0.15], [0.085, 0.25], [0.05, 0.31], [0.052, 0.35], [0.075, 0.38]].map(p => new THREE.Vector2(...p))).getPoints(30);
+  const vase = new THREE.Group();
+  const pot = new THREE.Mesh(new THREE.LatheGeometry(profile, 40), ceramic); pot.castShadow = true;
+  const band = new THREE.Mesh(new THREE.TorusGeometry(0.119, 0.007, 8, 48), dark); band.rotation.x = PI / 2; band.position.y = 0.13;
+  // Une fleur noire, toute simple.
+  const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.005, 0.005, 0.36, 6), dark); stem.position.y = 0.5;
+  const bloom = new THREE.Mesh(new THREE.SphereGeometry(0.05, 20, 14), dark); bloom.position.y = 0.69; bloom.castShadow = true;
+  const flower = new THREE.Group(); flower.add(stem, bloom);
+  vase.add(pot, band, flower); base.add(vase);
+
+  // Les éclats, cachés tant que le vase est entier.
+  const shards = [];
+  const shardGeo = new THREE.TetrahedronGeometry(0.055);
+  for (let i = 0; i < 12; i++) {
+    const m = new THREE.Mesh(shardGeo, ceramic); m.castShadow = true; m.visible = false;
+    base.add(m); shards.push({ m, v: new THREE.Vector3(), w: new THREE.Vector3(), rest: true });
+  }
+
+  const V = { broken: false, falling: false, wobble: 0, slide: 0, lookPoint: new THREE.Vector3(X_VASE, base.position.y + 0.62, 0), debris: new THREE.Vector3() };
+  const vel = new THREE.Vector3(); let spin = 0;
+  V.reset = () => {
+    V.broken = V.falling = false; V.wobble = V.slide = 0;
+    vase.visible = true; vase.position.set(0, TOP, 0); vase.rotation.set(0, 0, 0);
+    vase.add(flower); flower.position.set(0, 0, 0); flower.rotation.set(0, 0, 0);
+    for (const s of shards) { s.m.visible = false; s.rest = true; }
+  };
+  V.fall = () => { V.falling = true; vel.set(0.75, 0.35, 0.12); spin = -1.2; };
+  const floor = (x, z) => groundHeight(base.position.x + x, z) - base.position.y;
+  V.update = (dt, t) => {
+    if (V.falling) {
+      vel.y -= 9.8 * dt; spin -= 10 * dt;
+      vase.position.addScaledVector(vel, dt); vase.rotation.z += spin * dt;
+      if (vase.position.y < floor(vase.position.x, vase.position.z) + 0.08) {   // il touche le sol : il éclate
+        V.falling = false; V.broken = true; vase.visible = false;
+        const p = vase.position;
+        V.debris.set(base.position.x + p.x + 0.2, base.position.y + floor(p.x, p.z), p.z);
+        for (const s of shards) {
+          s.m.visible = true; s.rest = false;
+          s.m.position.set(p.x + (Math.random() - 0.5) * 0.2, p.y + Math.random() * 0.25, p.z + (Math.random() - 0.5) * 0.2);
+          s.m.scale.set(0.5 + Math.random(), 0.25 + Math.random() * 0.4, 0.5 + Math.random());
+          s.v.set(Math.random() * 1.6 - 0.3, 1 + Math.random() * 2, Math.random() * 1.6 - 0.5);
+          s.w.set(Math.random() * 12 - 6, Math.random() * 12 - 6, Math.random() * 12 - 6);
+        }
+        base.add(flower);                                                       // la fleur, elle, reste couchée là
+        flower.position.set(p.x - 0.15, floor(p.x + 0.3, 0.3) + 0.03, 0.3); flower.rotation.set(0.3, 0, -PI / 2);
+      }
+    } else if (!V.broken) {
+      V.wobble *= Math.exp(-2.6 * dt);                                           // l'oscillation s'amortit
+      vase.position.x = V.slide;
+      vase.rotation.z = Math.sin(t * 17) * V.wobble;
+    }
+    for (const s of shards) {
+      if (s.rest) continue;
+      s.v.y -= 9.8 * dt; s.m.position.addScaledVector(s.v, dt);
+      s.m.rotation.x += s.w.x * dt; s.m.rotation.y += s.w.y * dt; s.m.rotation.z += s.w.z * dt;
+      const f = floor(s.m.position.x, s.m.position.z) + 0.02;
+      if (s.m.position.y < f) {
+        s.m.position.y = f;
+        if (Math.abs(s.v.y) < 0.6) s.rest = true;
+        s.v.y *= -0.32; s.v.x *= 0.55; s.v.z *= 0.55; s.w.multiplyScalar(0.5);
+      }
+    }
+  };
+  return V;
+})();
+
+/* --- La pelote, et le fil qu'elle laisse derrière elle ------------------------ */
+const Y = (() => {
+  const tex = canvasTexture(256, (g, s) => {
+    g.fillStyle = '#f6f6f3'; g.fillRect(0, 0, s, s);
+    g.strokeStyle = 'rgba(25,25,28,.5)'; g.lineWidth = 2;
+    for (let i = 0; i < 90; i++) {   // des brins qui s'entrecroisent
+      const y = rand(s), a = rand(-0.9, 0.9);
+      g.beginPath(); g.moveTo(-10, y); g.bezierCurveTo(s * 0.3, y + a * 90, s * 0.7, y - a * 90, s + 10, y + a * 40); g.stroke();
+    }
+  });
+  const R = 0.16;
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(R, 32, 24), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95 }));
+  mesh.castShadow = true; scene.add(mesh);
+  const MAXP = 500, threadPos = new Float32Array(MAXP * 3), threadGeo = new THREE.BufferGeometry();
+  threadGeo.setAttribute('position', new THREE.BufferAttribute(threadPos, 3));
+  const threadMat = new THREE.LineBasicMaterial({ color: 0x202022 });
+  const thread = new THREE.Line(threadGeo, threadMat);
+  thread.frustumCulled = false; scene.add(thread);
+
+  const Y = { mesh, pos: mesh.position, x: X_YARN, v: 0, free: false, held: false, n: 0, last: X_YARN };
+  Y.reset = () => { Object.assign(Y, { x: X_YARN, v: 0, free: false, held: false, n: 0, last: X_YARN }); threadGeo.setDrawRange(0, 0); mesh.rotation.set(0, 0, 0); };
+  Y.update = (dt, t) => {
+    threadMat.color.copy(nearMat.color);
+    if (Y.held) {   // entre les pattes du chaton couché sur le dos
+      mesh.position.set(K.x + 0.03, K.root.position.y + 0.5 + Math.sin(t * 9) * 0.035, 0.24);
+      mesh.rotation.x += dt * 5; mesh.rotation.z += dt * 3; Y.x = K.x;
+      return;
+    }
+    if (Y.free) {   // elle roule : la pente l'entraîne, le frottement la freine
+      const slope = pathSlope(Y.x);
+      Y.v += (-9.8 * slope * 0.6 - 0.22 * Y.v - Math.sign(Y.v) * 0.05) * dt;
+      if (Math.abs(Y.v) < 0.06 && Math.abs(slope) < 0.04) Y.v = 0;
+      Y.x += Y.v * dt;
+      mesh.rotation.z -= Y.v * dt / R;
+      while (Y.x - Y.last > 0.1 && Y.n < MAXP) {   // le fil se dévide derrière elle
+        Y.last += 0.1;
+        threadPos.set([Y.last, pathHeight(Y.last) + 0.012, 0.12 + Math.sin(Y.last * 3.1) * 0.06], Y.n * 3);
+        threadGeo.setDrawRange(0, ++Y.n); threadGeo.attributes.position.needsUpdate = true;
+      }
+    }
+    const hop = Math.abs(Math.sin(Y.x * 2.1)) * 0.09 * clamp(Math.abs(Y.v) / 3, 0, 1);   // petits rebonds
+    mesh.position.set(Y.x, pathHeight(Y.x) + R + hop, 0.12);
+  };
+  return Y;
+})();
+
+/* --- Les lucioles (or), dont une plus curieuse que les autres ------------------- */
+const F = (() => {
+  const N = 46, seeds = [], pos = new Float32Array(N * 3), geo = new THREE.BufferGeometry();
+  for (let i = 0; i < N; i++) seeds.push({ x: X_MOON + rand(-11, 9), y: rand(0.3, 2.9), z: rand(-6, 2.4), p: rand(TAU), s: rand(0.4, 1.1) });
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const mat = new THREE.PointsMaterial({ color: GOLD, size: 0.13, map: softDot, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false });
+  const points = new THREE.Points(geo, mat); points.frustumCulled = false; scene.add(points);
+  // La luciole « héroïne » : un sprite et une petite lumière qui dore le museau.
+  const hero = new THREE.Sprite(new THREE.SpriteMaterial({ map: softDot, color: GOLD, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+  hero.scale.setScalar(0.2); hero.renderOrder = 6;
+  const glow = new THREE.PointLight(GOLD, 0, 2.2, 2);
+  scene.add(hero, glow);
+  const F = { amount: 0, level: 0, hero, heroOn: 0, heroLevel: 0, aim: null, pos: new THREE.Vector3() };
+  F.update = (dt, t) => {
+    F.level = damp(F.level, F.amount, 0.5, dt);
+    mat.opacity = F.level * (0.8 + 0.2 * Math.sin(t * 2.3));
+    for (let i = 0; i < N; i++) {
+      const s = seeds[i];
+      pos[i * 3] = s.x + Math.sin(t * s.s + s.p) * 0.6;
+      pos[i * 3 + 1] = groundHeight(s.x, s.z) + s.y + Math.sin(t * s.s * 1.3 + s.p * 2) * 0.35;
+      pos[i * 3 + 2] = s.z + Math.cos(t * s.s * 0.8 + s.p) * 0.5;
+    }
+    geo.attributes.position.needsUpdate = true;
+    F.heroLevel = damp(F.heroLevel, F.heroOn, 2, dt);
+    if (F.aim) { F.aim(_goal); F.pos.lerp(_goal, 1 - Math.exp(-1.8 * dt)); }
+    hero.position.copy(F.pos);
+    hero.material.opacity = F.heroLevel * (0.85 + 0.15 * Math.sin(t * 9));
+    glow.position.copy(F.pos); glow.intensity = F.heroLevel * 0.2;
+  };
+  return F;
+})();
+
+/* --- Une étoile filante, pour le plaisir ------------------------------------------ */
+const shooting = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: softDot, color: 0xffffff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+shooting.scale.set(11, 0.22, 1); shooting.rotation.z = 0.42; shooting.userData.k = 1; shooting.frustumCulled = false;
+scene.add(shooting);
+function updateShooting(dt) {
+  const u = shooting.userData; if (u.k >= 1) { shooting.material.opacity = 0; return; }
+  u.k = Math.min(1, u.k + dt / 0.9);
+  shooting.position.set(camera.position.x + lerp(-4, -28, u.k), camTarget.y + lerp(27, 17, u.k), -108);
+  shooting.material.opacity = Math.sin(u.k * PI) * 0.9;
+}
+
+function updateProps(dt, t) { B.update(dt, t); V.update(dt, t); Y.update(dt, t); F.update(dt, t); updateShooting(dt); updateEmotes(dt, t); }
+
+/* ==========================================================================
+   10. SON (remplacé plus bas par le vrai moteur audio)
+   ========================================================================== */
+const sfx = new Proxy({}, { get: () => () => {} });
+const music = { energy: 0.3, night: 0, motif() {} };
+
+/* ==========================================================================
+   11. LE RÉCIT
+   Écrit avec des générateurs : chaque `yield` rend la main jusqu'à l'image
+   suivante. Les scènes se lisent alors comme un script, de haut en bas.
+   ========================================================================== */
+
+/** Attend `sec` secondes ; `fn(k, dt)` est appelée à chaque image (k : 0..1). */
+function* wait(sec, fn) { let t = 0; while (t < sec) { const dt = yield; t += dt; if (fn) fn(Math.min(t / sec, 1), dt); } }
+/** Attend qu'une condition devienne vraie (avec une durée maximale de sécurité). */
+function* until(cond, max = 8) { let t = 0; while (!cond() && t < max) t += yield; }
+/** Fait marcher le chaton jusqu'à l'abscisse x. */
+function* walkTo(x, speed = 1.1) {
+  let v = 0; const dir = Math.sign(x - K.x) || 1;
+  while ((x - K.x) * dir > 0.005) {
+    const dt = yield, rem = Math.abs(x - K.x);
+    v = damp(v, Math.min(speed, 0.35 + rem * 3), 5, dt);
+    K.x += dir * Math.min(v * dt, rem);
+  }
+}
+/** Un bond : avance de dx en décrivant une cloche de hauteur h. */
+function* hop(dx, h, dur, fn) {
+  const x0 = K.x;
+  yield* wait(dur, k => { K.x = x0 + dx * k; K.snap({ jump: 4 * h * k * (1 - k) }); if (fn) fn(k); });
+  K.snap({ jump: 0 });
+}
+/** Renvoie une fonction qui déclenche `fn` à intervalle régulier. */
+const every = (period, fn) => { let acc = period * 0.7; return (k, dt) => { acc += dt; if (acc >= period) { acc -= period; fn(); } }; };
+/** Règle le plan de caméra visé et la vitesse à laquelle on le rejoint. */
+const shot = (o, rate = 0.8) => { Object.assign(camGoal, o); camRate = rate; };
+function* meow(pitch = 1) { sfx.meow(pitch); K.set({ mouth: 1, eyeOpen: 0.55 }); yield* wait(0.34); K.set({ mouth: 0, eyeOpen: 1 }); }
+
+/* Tâches d'arrière-plan (par exemple le lever de lune pendant que le chaton marche). */
+const tasks = [];
+const spawn = gen => { gen.next(); tasks.push(gen); };
+
+const chapterEl = document.getElementById('chapter'), fadeEl = document.getElementById('fade');
+let chapterTimer = 0;
+function chapter(num, title) {
+  chapterEl.innerHTML = `<b>${num}</b>${title}`; chapterEl.classList.add('on');
+  clearTimeout(chapterTimer); chapterTimer = setTimeout(() => chapterEl.classList.remove('on'), 4600 / SPEED);
+}
+
+/* Pose du sommeil : couché en rond, la queue ramenée contre lui. */
+const SLEEP = { lie: 1, eyeOpen: 0, tailWrap: 1, tailUp: -0.9, tailWag: 0.04, yaw: 0.95, headYaw: -0.55, headRoll: -0.22, earBack: 0.15 };
+const zzz = every(1.5, () => emote('z', ...overHead(0.05), { size: 0.17, life: 2.6, vx: 0.1, vy: 0.26, sway: 0.12, grow: 0.25, tilt: -0.2 }));
+
+/** Remet le monde dans son état initial (au premier lancement et à chaque boucle). */
+function resetWorld(sceneIndex = 1) {
+  const starts = [{ x: X_START, tod: 0 }, { x: 0.2, tod: 0.08 }, { x: 9.5, tod: 0.25 }, { x: 18.5, tod: 0.42 }, { x: 45.5, tod: 0.74 }];
+  const s = starts[sceneIndex - 1];
+  K.x = K.prevX = s.x; K.lookTarget = null; K.rate = 7;
+  K.snap({ ...K.defaults, ...(sceneIndex === 1 ? SLEEP : {}) });
+  world.tod = world.todGoal = s.tod; world.todRate = 0.2; world.moon = 0; world.shake = 0;
+  F.amount = F.level = 0; F.heroOn = 0; F.aim = null;
+  V.reset(); Y.reset(); B.hide(); tasks.length = 0;
+  music.energy = 0.3; music.night = 0; sfx.purr(false);
+}
+
+/* --- I. L'éveil -------------------------------------------------------------------- */
+function* sceneWake() {
+  chapter('i', 'l’éveil');
+  shot({ dist: 4.2, height: 0.3, az: 0.3, ahead: 0, lift: 0.6 });
+  world.todGoal = 0.1; music.motif();
+  yield* wait(2.6, zzz);
+  K.set({ eyeOpen: 0.3 }); yield* wait(1.0);                 // un œil s'entrouvre...
+  K.set({ eyeOpen: 0 }); yield* wait(0.8);                   // ... non, encore cinq minutes
+  K.set({ eyeOpen: 1, headRoll: 0, headYaw: -0.9, earBack: 0 }); yield* wait(1.1);
+  // Il s'étire de tout son long en bâillant.
+  K.neutral({ yaw: PI / 2, stretch: 1, mouth: 1, eyeOpen: 0.07, tailUp: 1, headPitch: -0.35 }); sfx.yawn();
+  yield* wait(1.9);
+  K.neutral({ yaw: PI / 2 }); yield* wait(0.6);
+  yield* wait(0.55, k => K.snap({ roll: Math.sin(k * PI * 6) * 0.17 * (1 - k) }));   // il s'ébroue
+  K.snap({ roll: 0 });
+  K.set({ headYaw: -1.0, headRoll: 0.2 }); yield* wait(0.7);  // bonjour, vous
+  yield* meow(1); yield* wait(0.8);
+  K.set({ headYaw: 0, headRoll: 0 });
+}
+
+/* --- II. Le papillon ---------------------------------------------------------------- */
+function* sceneButterfly() {
+  chapter('ii', 'le papillon');
+  world.todGoal = 0.25; music.energy = 0.55;
+  shot({ dist: 6.2, height: 0.45, az: 0.12, ahead: 0.9, lift: 1.0 }, 0.7);
+  const gy = x => pathHeight(x);
+  B.appear(K.x + 9, gy(K.x + 9) + 2.4, -1.5);
+  B.aim = v => v.set(X_BUTTERFLY + 1.2, gy(X_BUTTERFLY + 1.2) + 0.85, 0.15);
+  yield* walkTo(X_BUTTERFLY, 1.1);
+
+  // Il s'arrête net : qu'est-ce que c'est que ça ?
+  K.lookTarget = B.group.position; K.set({ pupil: 1.3, headRoll: 0.25, tailUp: 0.9 });
+  emote('what', ...overHead()); sfx.pop(0.8);
+  yield* wait(1.4);
+  // Le papillon vient lui danser sous le nez.
+  B.aim = v => v.set(K.x + 0.62 + Math.sin(time * 1.7) * 0.12, gy(K.x) + 0.72 + Math.sin(time * 2.3) * 0.1, 0.22);
+  K.set({ headRoll: 0 }); yield* wait(1.7);
+  // Coup de patte... dans le vide.
+  K.rate = 15; K.set({ paw: 1 }); sfx.swish(); yield* wait(0.2);
+  B.aim = v => v.set(K.x + 0.95, gy(K.x) + 1.3, 0.2);
+  K.set({ paw: 0 }); yield* wait(0.6); K.rate = 7;
+  // Le papillon va se poser un peu plus loin, l'air de rien.
+  B.flutter = 0.35; B.aim = v => v.set(X_BUTTERFLY + 1.8, gy(X_BUTTERFLY + 1.8) + 0.3, 0.1);
+  yield* wait(1.0);
+
+  // À l'affût : il se tapit, l'arrière-train se dandine...
+  shot({ dist: 4.6, height: 0.3, az: 0.32, ahead: 0.9, lift: 0.6 }, 1.2);
+  K.set({ crouch: 1, pupil: 1.45, earBack: 0.3, tailUp: -0.2, tailWag: 1 }); yield* wait(0.6);
+  K.set({ wiggle: 1 }); sfx.wiggle(); yield* wait(1.35);
+  K.set({ wiggle: 0 }); yield* wait(0.25);
+  // ... et bondit !
+  sfx.whoosh(); K.set({ crouch: 0, stretch: 0.5, earBack: 0.8 });
+  yield* hop(1.6, 0.62, 0.5, k => { if (k > 0.3) { B.flutter = 1; B.aim = v => v.set(K.x + 1.2, gy(K.x) + 1.9, -0.6); } });
+  // Raté. Atterrissage sur le museau, puis culbute.
+  sfx.thud(); sfx.boing(); puff(K.x + 0.3); world.shake = 0.03;
+  K.lookTarget = null; K.snap({ squash: 0.6 }); K.set({ squash: 1, stretch: 0, tuck: 1, eyeOpen: 0.1, headYaw: 0, headPitch: 0 });
+  const x0 = K.x;
+  yield* wait(0.8, k => { K.x = x0 + 0.95 * easeOut(k); K.snap({ spin: easeOut(k) * TAU, jump: Math.sin(k * PI) * 0.14 }); });
+  K.snap({ spin: 0, jump: 0 }); puff(K.x, 0, 3);
+  // Assis, un peu sonné.
+  K.neutral({ sit: 1, tailUp: -0.7, tailWrap: 0.4, pupil: 0.7, earBack: 0.5 });
+  for (let i = 0; i < 3; i++) emote('star', K.x + 0.1 + i * 0.16, K.root.position.y + 1.05 + (i % 2) * 0.1, 0.1, { size: 0.12, life: 1.5, vy: 0.12, sway: 0.5 });
+  yield* wait(1.4, k => K.snap({ headRoll: Math.sin(k * PI * 5) * 0.3 * (1 - k) }));
+
+  // Le papillon revient... et se pose sur son nez.
+  B.perch = true; B.aim = v => K.nosePosition(v, 0.02, 0.035);
+  K.set({ earBack: 0, pupil: 1.2, headRoll: 0 });
+  shot({ dist: 3.2, height: 0.2, az: 0.55, ahead: 0.1, lift: 0.62 }, 1.0);
+  yield* wait(1.5);
+  K.set({ cross: 1 }); yield* wait(2.1);                     // il louche dessus, longuement
+  // Ça chatouille... atchoum !
+  sfx.sneezeIn(); K.set({ headPitch: -0.45, eyeOpen: 0.15, cross: 0, mouth: 0.5, earBack: 0.5 }); yield* wait(0.8);
+  sfx.sneezeOut(); K.rate = 18; K.set({ headPitch: 0.5, eyeOpen: 0.06, mouth: 1 });
+  B.perch = false; B.flutter = 1; B.rate = 1.1; B.aim = v => v.set(K.x + 7, gy(K.x) + 5, -4);
+  yield* wait(0.3); K.rate = 7; K.set({ headPitch: 0, eyeOpen: 1, mouth: 0, earBack: 0 }); yield* wait(0.5);
+  K.lookTarget = B.group.position; yield* wait(1.3);          // il le regarde s'éloigner
+  K.lookTarget = null; yield* meow(1.12); yield* wait(0.5);
+  K.neutral(); B.rate = 2.2;
+  spawn((function* () { yield* wait(4); B.hide(); })());
+}
+
+/* --- III. La bêtise ------------------------------------------------------------------- */
+function* sceneVase() {
+  chapter('iii', 'la bêtise');
+  world.todGoal = 0.42; music.energy = 0.6;
+  shot({ dist: 7.5, height: 0.5, az: -0.08, ahead: 1.4, lift: 1.2 }, 0.6);
+  yield* walkTo(X_VASE - 2.6, 1.15);
+  K.lookTarget = V.lookPoint; K.set({ pupil: 1.25 });
+  yield* walkTo(X_VASE - 0.64, 0.7);
+  shot({ dist: 4.3, height: 0.3, az: 0.28, ahead: 0.35, lift: 0.65 }, 1.0);
+  K.neutral({ sit: 1, tailUp: -0.7, tailWrap: 0.35, pupil: 1.25 });
+  emote('what', ...overHead()); sfx.pop(0.8);
+  yield* wait(1.3); K.set({ headRoll: 0.3 }); yield* wait(0.9); K.set({ headRoll: 0 });
+  // Tap. Tap. Le vase vacille.
+  for (const amp of [0.09, 0.2]) {
+    K.rate = 16; K.set({ paw: 1 }); yield* wait(0.17);
+    V.wobble = amp; sfx.tink(amp * 5); K.set({ paw: 0 });
+    yield* wait(amp > 0.15 ? 1.25 : 0.8);
+  }
+  K.rate = 7;
+  // Regard caméra. Long. Très long.
+  K.lookTarget = null; K.set({ headYaw: -1.15, headPitch: 0, pupil: 1 }); yield* wait(1.6);
+  // Et, sans nous quitter des yeux, il pousse.
+  K.set({ paw: 1 }); yield* wait(0.35); sfx.scrape(0.9);
+  yield* wait(0.9, k => { V.slide = easeInOut(k) * 0.17; });
+  V.fall(); K.set({ paw: 0 });
+  yield* until(() => V.broken, 3);
+  sfx.crash(); world.shake = 0.06; puff(V.debris.x, 0.1, 6);
+  // Sursaut : oreilles couchées, queue en écouvillon.
+  K.rate = 20; K.set({ earBack: 1, pupil: 0.6, tailFluff: 1, tailUp: 1, headYaw: -0.2 });
+  emote('bang', ...overHead(0.1));
+  yield* hop(-0.3, 0.34, 0.34);
+  K.rate = 7; yield* wait(0.8);
+  K.lookTarget = V.debris; K.set({ tailFluff: 0, earBack: 0.6, pupil: 1 }); yield* wait(1.3);   // il contemple les dégâts
+  K.lookTarget = null; K.set({ headYaw: -1.15, headPitch: 0, earBack: 0.3 }); yield* wait(1.2);  // puis nous
+  // L'air de rien : il regarde ailleurs en sifflotant.
+  K.set({ headYaw: 0.4, headPitch: -0.5, eyeOpen: 0.5, earBack: 0, gazeY: 0.9, tailWag: 1, tailUp: -0.4, mouth: 0.22 });
+  sfx.whistle();
+  yield* wait(2.5, every(0.45, () => emote('note', K.x + 0.45, K.root.position.y + 0.95, 0.2, { size: 0.15, life: 1.3, vx: 0.25, vy: 0.3, sway: 0.3 })));
+  // Et il file à l'anglaise, en contournant le socle.
+  shot({ dist: 7, height: 0.45, az: 0.0, ahead: 1.5, lift: 1.1 }, 0.7);
+  K.neutral({ z: -0.8, tailUp: 1 });
+  yield* walkTo(X_VASE + 2.6, 2.0);
+  K.set({ z: 0, tailUp: 0.4 });
+}
+
+/* --- IV. La pelote --------------------------------------------------------------------- */
+function* sceneYarn() {
+  chapter('iv', 'la pelote');
+  world.todGoal = 0.55;
+  shot({ dist: 7, height: 0.45, az: 0.05, ahead: 1.2, lift: 1.1 }, 0.6);
+  yield* walkTo(X_YARN - 1.7, 1.15);
+  K.lookTarget = Y.pos; K.set({ pupil: 1.3 });
+  yield* walkTo(X_YARN - 0.6, 0.6);
+  shot({ dist: 4.6, height: 0.3, az: 0.3, ahead: 0.5, lift: 0.6 }, 1.0);
+  K.set({ headRoll: -0.3 }); yield* wait(1.0); K.set({ headRoll: 0.3 }); yield* wait(0.8); K.set({ headRoll: 0 });
+  // Un tout petit coup de patte...
+  K.rate = 16; K.set({ paw: 1 }); yield* wait(0.17);
+  Y.free = true; Y.v = 1.7; sfx.pat(); K.set({ paw: 0 }); K.rate = 7;
+  yield* wait(1.0);                                            // ... et elle s'en va toute seule !
+  emote('bang', ...overHead()); sfx.pop(1.3); K.set({ pupil: 1.45, crouch: 0.6 }); yield* wait(0.4);
+
+  // Course-poursuite dans la descente, tandis que le jour baisse.
+  shot({ dist: 9.5, height: 0.8, az: -0.22, ahead: 2.4, lift: 1.4 }, 0.9);
+  music.energy = 1; world.todGoal = 0.74; world.todRate = 0.11;
+  K.lookTarget = null; K.neutral({ run: 1, tailUp: 0.9, pupil: 1.3 });
+  let v = 0, chase = 0;
+  while (Y.x < 42.5 && chase < 16) {
+    const dt = yield; chase += dt;
+    v = damp(v, clamp((Y.x - K.x - 0.25) * 3.2, 0, 4.6), 3, dt);
+    K.x += v * dt;
+  }
+  // Il plonge dessus...
+  sfx.whoosh(); K.set({ run: 0, stretch: 0.4 }); Y.free = false; Y.v = 0;
+  yield* hop(Y.x - K.x, 0.5, 0.42);
+  sfx.thud(); puff(K.x); music.energy = 0.45; world.shake = 0.02;
+  // ... et se retrouve sur le dos, la pelote entre les pattes.
+  shot({ dist: 4.2, height: 0.35, az: 0.3, ahead: 0, lift: 0.55 }, 1.2);
+  Y.held = true; K.neutral({ air: 1, roll: -2.3, tailWag: 1 }); sfx.purr(true);
+  const hearts = every(1.3, () => emote('heart', K.x + rand(-0.2, 0.2), K.root.position.y + 0.8, 0.2, { color: CORAL, size: 0.15, life: 2.2, vy: 0.4, sway: 0.25 }));
+  yield* wait(4.2, (k, dt) => { K.set({ roll: -2.3 + Math.sin(time * 3.2) * 0.3 }); if (k > 0.3) hearts(k, dt); });
+  // La pelote lui échappe ; il se remet d'aplomb.
+  sfx.purr(false); Y.held = false; Y.x = K.x + 0.25; Y.v = 1.2; Y.free = true;
+  K.set({ roll: 0, air: 0 }); yield* wait(0.7);
+  K.neutral({ sit: 1, tailUp: -0.7, tailWrap: 0.35 }); K.lookTarget = Y.pos; yield* wait(1.6);
+  K.lookTarget = null; K.set({ headPitch: -0.45, headYaw: -0.3, pupil: 1.3 }); yield* wait(1.6);   // il lève le nez : le ciel a changé
+}
+
+/* --- V. La lune ---------------------------------------------------------------------------- */
+function* sceneMoon() {
+  chapter('v', 'la lune');
+  world.todGoal = 1; world.todRate = 0.1; music.energy = 0.3; music.night = 1;
+  shot({ dist: 8.5, height: 0.6, az: -0.28, ahead: 1.6, lift: 1.5 }, 0.5);
+  K.neutral({ tailUp: 0.5 });
+  yield* walkTo(51, 1.05);
+  spawn((function* () { yield* wait(13, k => { world.moon = k; }); })());   // la lune se lève pendant la montée
+  F.amount = 1;
+  yield* walkTo(X_MOON, 0.9);
+  // Il s'assoit face à elle. On le voit de trois quarts dos.
+  shot({ dist: 6.8, height: 0.4, az: -0.15, ahead: 0.9, lift: 1.5 }, 0.5);
+  K.neutral({ sit: 1, yaw: PI / 2 + 0.75, tailUp: -0.7, tailWrap: -0.3, tailWag: 0.8, headPitch: -0.3, pupil: 1.3 });
+  yield* wait(2.6);
+  shooting.userData.k = 0; sfx.sparkle();
+  yield* wait(2.4);
+  // Une luciole s'approche... et se pose sur son museau.
+  F.pos.set(K.x + 2.6, K.root.position.y + 1.9, 1.2); F.heroOn = 1;
+  F.aim = v => K.nosePosition(v, 0.05, 0.02);
+  K.set({ yaw: PI / 2 - 0.5, headPitch: 0 }); K.lookTarget = F.pos;
+  shot({ dist: 3.6, height: 0.25, az: 0.42, ahead: 0, lift: 0.65 }, 0.7);
+  yield* wait(2.8);
+  K.lookTarget = null; K.set({ cross: 1, headYaw: -0.25, headPitch: 0 }); sfx.sparkle(); yield* wait(2.0);
+  // Ronron, yeux mi-clos, et quelques petits cœurs.
+  K.set({ eyeOpen: 0.1, cross: 0, earBack: 0.2, headRoll: 0.15 }); sfx.purr(true);
+  yield* wait(5.5, every(0.75, () => { emote('heart', K.x + rand(-0.25, 0.3), K.root.position.y + 1.0, 0.25, { color: CORAL, size: rand(0.13, 0.2), life: 2.6, vy: 0.42, sway: 0.3 }); sfx.pop(1 + Math.random() * 0.5); }));
+  // La luciole repart rejoindre les autres ; il la suit des yeux.
+  F.aim = v => v.set(K.x + 1.5, K.root.position.y + 3.4, -2.5);
+  K.set({ eyeOpen: 1, headRoll: 0, earBack: 0 }); K.lookTarget = F.pos; yield* wait(2.4);
+  K.lookTarget = null; F.heroOn = 0;
+  // Il tourne sur lui-même, comme font les chats, puis se couche en rond.
+  shot({ dist: 6, height: 0.5, az: 0.1, ahead: 0, lift: 1.0 }, 0.4);
+  K.neutral({ yaw: K.g.yaw }); yield* wait(0.5);
+  const x0 = K.x, yaw0 = K.g.yaw;
+  yield* wait(2.0, k => { K.x = x0 + Math.sin(k * TAU) * 0.14; K.snap({ yaw: yaw0 - easeInOut(k) * TAU }); });
+  K.snap({ yaw: yaw0 });
+  K.set({ ...SLEEP, eyeOpen: 0.6 }); yield* wait(1.2);
+  K.set({ mouth: 1, eyeOpen: 0.05 }); sfx.yawn(); yield* wait(1.3);
+  K.set({ mouth: 0, eyeOpen: 0 });
+  // La caméra s'éloigne doucement. Bonne nuit.
+  shot({ dist: 11, height: 1.4, az: 0.0, ahead: 0.5, lift: 2.2 }, 0.22);
+  music.motif(); sfx.purr(false);
+  yield* wait(8, zzz);
+  fadeEl.classList.add('on'); yield* wait(3.2);
+}
+
+/* Le récit complet, qui recommence sans fin. */
+const SCENES = [sceneWake, sceneButterfly, sceneVase, sceneYarn, sceneMoon];
+function* story(first) {
+  for (;;) {
+    resetWorld(first);
+    focus.x = K.x; focus.y = pathHeight(K.x); updateCamera(0, time, true);
+    fadeEl.classList.remove('on');
+    for (let i = first - 1; i < SCENES.length; i++) yield* SCENES[i]();
+    first = 1;
+  }
+}
+/* Avant le clic : le chaton dort, tout simplement. */
+function* slumber() {
+  resetWorld(1);
+  for (;;) yield* wait(10, zzz);
+}
+
+let script = null;
+function updateStory(dt) {
+  if (script) script.next(dt);
+  for (let i = tasks.length - 1; i >= 0; i--) if (tasks[i].next(dt).done) tasks.splice(i, 1);
+}
 
 /* ==========================================================================
    BOUCLE PRINCIPALE ET REDIMENSIONNEMENT
    ========================================================================== */
 
-let time = 0;
 /** Avance toute la simulation de `dt` secondes. */
 function step(dt) {
   time += dt;
+  updateStory(dt);
   K.update(dt, time);
+  updateProps(dt, time);
   focus.x = K.x; focus.y = groundHeight(K.x, K.p.z) + K.p.jump * 0.35;
   updateCamera(dt, time);
   updateWorld(dt, time);
@@ -806,6 +1382,17 @@ function onResize() {
 }
 window.addEventListener('resize', onResize);
 
+/* Démarrage : le récit (et le son) commencent au premier clic. */
+const introEl = document.getElementById('intro');
+let started = false;
+function start() {
+  if (started) return; started = true;
+  introEl.classList.add('off');
+  script = story(START_SCENE); script.next();
+}
+introEl.addEventListener('click', start);
+script = slumber(); script.next();
+
 const clock = new THREE.Clock();
 updateCamera(0, 0, true);
 renderer.setAnimationLoop(() => {
@@ -815,7 +1402,7 @@ renderer.setAnimationLoop(() => {
 });
 
 /* Petit accès de mise au point (console) : avancer le temps sans attendre. */
-window.__debug = { step, world, cam, camGoal, K, render: () => renderer.render(scene, camera) };
+window.__debug = { step, start, world, cam, camGoal, K, render: () => renderer.render(scene, camera) };
 </script>
 <script>
   /* Si le module n'a pas pu se charger (pas de réseau), on l'explique. */
