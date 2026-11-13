@@ -425,7 +425,7 @@ function applyPalette() {
    ========================================================================== */
 
 /* Réglages courants et réglages visés ; le récit ne modifie que `camGoal`. */
-const cam = { dist: 4.4, height: 0.3, az: 0.35, ahead: 0, lift: 0.6 };
+const cam = { dist: 5.2, height: 0.35, az: 0.35, ahead: 0, lift: 1.15 };   // plan d'attente, sous le titre
 const camGoal = { ...cam };
 let camRate = 0.8;
 const camTarget = new THREE.Vector3(X_START, pathHeight(X_START) + 0.4, 0);
@@ -754,7 +754,7 @@ function createKitten() {
     const gx = p.gazeX + mouse.sx * Math.cos(p.yaw + p.headYaw) * 0.5, gy = p.gazeY - mouse.sy * 0.35;
     for (const e of eyes) {
       e.eye.scale.y = open;
-      e.eye.rotation.z = -e.side * 0.3 * (1 - open);   // paupière close : un petit arc paisible
+      e.eye.rotation.z = -e.side * 0.5 * (1 - open);   // paupière close : un petit arc paisible
       e.pupil.scale.set(0.04 * p.pupil, 0.05 * p.pupil, 0.012);
       e.pupil.position.x = clamp(gx * 0.022 - e.side * p.cross * 0.03, -0.032, 0.032);
       e.pupil.position.y = clamp(gy * 0.02, -0.026, 0.026);
@@ -1321,7 +1321,7 @@ function chapter(num, title) {
 }
 
 /* Pose du sommeil : couché en rond, la queue ramenée contre lui. */
-const SLEEP = { lie: 1, eyeOpen: 0, tailWrap: 1, tailUp: -0.9, tailWag: 0.04, yaw: 0.95, headYaw: -0.55, headRoll: -0.22, earBack: 0.15 };
+const SLEEP = { lie: 1, eyeOpen: 0, tailWrap: 1, tailUp: -0.9, tailWag: 0.04, yaw: 0.95, headYaw: -0.55, headPitch: -0.22, headRoll: -0.18, earBack: 0.15 };
 const zzz = every(1.5, () => emote('z', ...overHead(0.05), { size: 0.17, life: 2.6, vx: 0.1, vy: 0.26, sway: 0.12, grow: 0.25, tilt: -0.2 }));
 
 /** Remet le monde dans son état initial (au premier lancement et à chaque boucle). */
@@ -1554,8 +1554,10 @@ function* sceneMoon() {
 const SCENES = [sceneWake, sceneButterfly, sceneVase, sceneYarn, sceneMoon];
 function* story(first) {
   for (;;) {
+    const replay = time > 0 && fadeEl.classList.contains('on');
     resetWorld(first);
-    focus.x = K.x; focus.y = pathHeight(K.x); updateCamera(0, time, true);
+    focus.x = K.x; focus.y = pathHeight(K.x);
+    if (replay || first > 1) updateCamera(0, time, true);   // au tout premier lancement, la caméra glisse depuis le plan d'attente
     fadeEl.classList.remove('on');
     for (let i = first - 1; i < SCENES.length; i++) yield* SCENES[i]();
     first = 1;
@@ -1619,13 +1621,14 @@ renderer.setAnimationLoop(() => {
 });
 
 /* Petit accès de mise au point (console) : avancer le temps sans attendre. */
+document.getElementById('error').style.display = 'none';
 window.__debug = { manual: false, step, start, audio, music, world, cam, camGoal, K, render: () => renderer.render(scene, camera) };
 </script>
 <script>
   /* Si le module n'a pas pu se charger (pas de réseau), on l'explique. */
   window.addEventListener('load', () => setTimeout(() => {
     if (!window.__debug) document.getElementById('error').style.display = 'flex';
-  }, 4000));
+  }, 8000));
 </script>
 </body>
 </html>
