@@ -551,6 +551,7 @@ function createKitten() {
   hips.add(chestG, rumpG);
   const body = blob(hips, fur, 0.2, 0.195, 0.31);                        // ventre
   const chest = blob(chestG, fur, 0.192, 0.19, 0.19, 0, 0.012, 0.11);    // poitrail
+  blob(chestG, fur, 0.14, 0.14, 0.13, 0, 0.1, 0.17);                      // encolure : relie la tête au corps d'une seule courbe
   const rump = blob(rumpG, fur, 0.195, 0.188, 0.19, 0, 0, -0.1);         // croupe
 
   /* --- Tête : grosse et ronde, comme chez tous les chatons --- */
@@ -565,7 +566,10 @@ function createKitten() {
   blob(head, white, 0.062, 0.05, 0.05, -0.038, -0.035, 0.262, false);
   blob(head, white, 0.045, 0.036, 0.04, 0, -0.072, 0.25, false);
   const nose = blob(head, noseMat, 0.023, 0.015, 0.014, 0, -0.01, 0.314, false);
-  const mouth = blob(head, black, 0.016, 0.004, 0.02, 0, -0.064, 0.297, false);
+  const mouth = blob(head, black, 0.016, 0.004, 0.02, 0, -0.07, 0.297, false);
+  // Le sourire : deux petits arcs sous la truffe, qui s'étirent avec le canal « smile ».
+  const smileGeo = new THREE.TorusGeometry(0.021, 0.0042, 6, 14, PI); smileGeo.rotateZ(PI);
+  const smiles = [1, -1].map(s => { const m = new THREE.Mesh(smileGeo, black); m.position.set(s * 0.021, -0.03, 0.31); m.rotation.y = s * 0.35; head.add(m); return m; });
 
   // Moustaches : de fins traits blancs.
   const whiskerGeo = new THREE.CylinderGeometry(0.0022, 0.0008, 0.2, 5); whiskerGeo.translate(0, 0.1, 0);
@@ -583,7 +587,10 @@ function createKitten() {
     blob(eye, eyeMat, 0.068, 0.076, 0.04, 0, 0, 0, false);
     const pupil = blob(eye, black, 0.04, 0.05, 0.012, 0, 0, 0.034, false);
     blob(eye, glintMat, 0.013, 0.013, 0.006, 0.018, 0.026, 0.046, false);
-    head.add(eye); eyes.push({ eye, pupil, side: s });
+    blob(eye, glintMat, 0.006, 0.006, 0.004, -0.016, -0.02, 0.046, false);
+    // Paupière : une coque de pelage qui descend sur l'œil et s'incline (c'est elle qui fait l'expression).
+    const lid = blob(eye, fur, 0.078, 0.082, 0.05, 0, 0.12, 0, false);
+    head.add(eye); eyes.push({ eye, pupil, lid, side: s });
   }
 
   // Oreilles : cônes à pointe arrondie (géométrie de révolution).
@@ -595,24 +602,72 @@ function createKitten() {
     const ear = new THREE.Group(); ear.position.set(s * 0.135, 0.215, 0.04);
     const outer = new THREE.Mesh(earGeo, fur); outer.scale.set(1, 1, 0.55); outer.castShadow = true;
     const inner = new THREE.Mesh(earGeo, earInner); inner.scale.set(0.68, 0.74, 0.3); inner.position.set(0, 0.012, 0.035);
-    ear.add(outer, inner); head.add(ear); ears.push({ ear, side: s, flick: 0 });
+    ear.add(outer, inner); ear.scale.setScalar(1.14); head.add(ear); ears.push({ ear, side: s, flick: 0 });
+    // Touffe de poils sur la joue : elle élargit le visage en un contour souple.
+    const tuft = new THREE.Mesh(earGeo, fur); tuft.scale.set(0.62, 0.5, 0.32);
+    tuft.position.set(s * 0.19, -0.03, 0.09); tuft.rotation.z = -s * (PI / 2 + 0.3); tuft.castShadow = true;
+    head.add(tuft);
   }
 
   /* --- Pattes : deux segments articulés (épaule ou hanche, puis coude ou genou) --- */
-  const upperGeo = new THREE.CapsuleGeometry(0.066, L1 - 0.03, 6, 16); upperGeo.translate(0, -L1 / 2, 0);
-  const lowerGeo = new THREE.CapsuleGeometry(0.055, L2 - 0.03, 6, 16); lowerGeo.translate(0, -L2 / 2, 0);
+  /* Le squelette (deux os et une articulation) reste invisible. Ce qu'on voit,
+     c'est une « peau » : un tube galbé tendu le long d'une courbe qui adoucit
+     le coude ou le genou, large à l'attache et fin à la cheville. C'est ce
+     qui donne des membres souples de dessin animé plutôt que des tiges. */
+  const _c = new THREE.Vector3(), _q = new THREE.Vector3();
+  const LR = 11, LS = 12;            // anneaux par patte, sommets par anneau
+  const limbSkins = [];
+  function makeLimbSkin() {
+    const geo = new THREE.BufferGeometry(), pos = new Float32Array(LR * LS * 3), nor = new Float32Array(LR * LS * 3), idx = [];
+    for (let r = 0; r < LR - 1; r++) for (let j = 0; j < LS; j++) {
+      const a = r * LS + j, b = r * LS + (j + 1) % LS;
+      idx.push(a, b, a + LS, b, b + LS, a + LS);
+    }
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+    geo.setIndex(idx);
+    const mesh = new THREE.Mesh(geo, fur); mesh.castShadow = true; mesh.frustumCulled = false;
+    limbSkins.push(mesh);
+    return { geo, pos, nor };
+  }
+  const _H = new THREE.Vector3(), _Kn = new THREE.Vector3(), _F = new THREE.Vector3(), _C = new THREE.Vector3();
+  const _P = new THREE.Vector3(), _T = new THREE.Vector3(), _S = new THREE.Vector3(), _N = new THREE.Vector3();
+  /** Retend la peau des quatre pattes sur leur squelette (matrices monde à jour). */
+  function skinLegs() {
+    for (const L of legs) {
+      const { pos, nor, geo } = L.skin;
+      _H.setFromMatrixPosition(L.leg.matrixWorld); _Kn.setFromMatrixPosition(L.knee.matrixWorld);
+      _F.set(0, -L2, 0).applyMatrix4(L.knee.matrixWorld);
+      _S.setFromMatrixColumn(L.leg.matrixWorld, 0).normalize();
+      // Point de contrôle : l'articulation, un peu exagérée, pour que la courbe passe près d'elle sans angle.
+      _C.copy(_H).add(_F).multiplyScalar(-0.5).add(_Kn).multiplyScalar(0.45).add(_Kn);
+      for (let r = 0; r < LR; r++) {
+        const k = r / (LR - 1), a = (1 - k) * (1 - k), b = 2 * k * (1 - k), c = k * k;
+        _P.set(a * _H.x + b * _C.x + c * _F.x, a * _H.y + b * _C.y + c * _F.y, a * _H.z + b * _C.z + c * _F.z);
+        _T.set((1 - k) * (_C.x - _H.x) + k * (_F.x - _C.x), (1 - k) * (_C.y - _H.y) + k * (_F.y - _C.y), (1 - k) * (_C.z - _H.z) + k * (_F.z - _C.z)).normalize();
+        _N.crossVectors(_T, _S).normalize(); _q.crossVectors(_N, _T);
+        // Galbe : cuisse ronde à l'arrière, épaule plus fine à l'avant, cheville étroite.
+        const rad = lerp(L.front ? 0.08 : 0.104, 0.047, Math.pow(k, L.front ? 0.75 : 0.6)) + 0.006 * Math.sin(k * PI);
+        for (let j = 0; j < LS; j++) {
+          const an = j / LS * TAU, cs = Math.cos(an), sn = Math.sin(an), o = (r * LS + j) * 3;
+          const nx = cs * _q.x + sn * _N.x, ny = cs * _q.y + sn * _N.y, nz = cs * _q.z + sn * _N.z;
+          pos[o] = _P.x + nx * rad; pos[o + 1] = _P.y + ny * rad; pos[o + 2] = _P.z + nz * rad;
+          nor[o] = nx; nor[o + 1] = ny; nor[o + 2] = nz;
+        }
+      }
+      geo.attributes.position.needsUpdate = true; geo.attributes.normal.needsUpdate = true;
+    }
+  }
   const legs = [];
   // Ordre : avant côté caméra, avant côté opposé, arrière côté caméra, arrière côté opposé.
   [[-0.11, 0.2], [0.11, 0.2], [-0.12, -0.2], [0.12, -0.2]].forEach(([x, z], i) => {
     const front = i < 2, parentG = front ? chestG : rumpG;
     const leg = new THREE.Group(); leg.position.set(x, -0.045, z - parentG.position.z);
     const knee = new THREE.Group(); knee.position.y = -L1;
-    const upper = new THREE.Mesh(upperGeo, fur), lower = new THREE.Mesh(lowerGeo, fur);
-    upper.castShadow = lower.castShadow = true;
-    leg.add(upper, knee); knee.add(lower);
-    blob(knee, fur, 0.07, 0.046, 0.086, 0, -L2 + 0.005, 0.028);          // coussinet
+    leg.add(knee);
+    const paw = blob(knee, fur, 0.072, 0.05, 0.09, 0, -L2 + 0.005, 0.03);   // patte ronde
     parentG.add(leg);
-    legs.push({ leg, knee, front, parentG, pivot: leg.position.clone(), restX: x * 0.85, restZ: z, u: 0 });
+    legs.push({ leg, knee, paw, front, parentG, pivot: leg.position.clone(), restX: x * 0.85, restZ: z, u: 0, lift: 0, skin: makeLimbSkin() });
   });
   /** Cinématique inverse à deux os : plie la patte pour que son extrémité
       atteigne la cible (tx, ty, tz), exprimée dans le repère de son demi-tronc. */
@@ -649,7 +704,7 @@ function createKitten() {
   for (let i = 0; i < TAIL; i++) {
     const joint = new THREE.Group();
     joint.position.set(0, i ? 0.033 : 0.09, i ? 0 : -0.26);
-    parent.add(joint); tail.push({ joint, r: lerp(0.047, 0.034, i / (TAIL - 1)) }); parent = joint;
+    parent.add(joint); tail.push({ joint, r: 0.038 + 0.018 * Math.sin(Math.pow(i / (TAIL - 1), 0.8) * PI) }); parent = joint;   // renflée au milieu, effilée au bout parent = joint;
   }
   const tailGeo = new THREE.BufferGeometry();
   const tailPos = new Float32Array(RINGS * RAD * 3), tailNor = new Float32Array(RINGS * RAD * 3), tailIdx = [];
@@ -662,10 +717,10 @@ function createKitten() {
   tailGeo.setIndex(tailIdx);
   const tailMesh = new THREE.Mesh(tailGeo, fur);
   tailMesh.castShadow = true; tailMesh.frustumCulled = false;
-  root.userData.tailMesh = tailMesh;     // ajouté à la scène : ses sommets sont en coordonnées monde
-  const _c = new THREE.Vector3(), _q = new THREE.Vector3();
+  root.userData.skins = [tailMesh, ...limbSkins];     // ajoutés à la scène : leurs sommets sont en coordonnées monde
   function skinTail(fluff) {
     root.updateMatrixWorld(true);
+    skinLegs();
     for (let r = 0; r < RINGS; r++) {
       const i = Math.min(r, TAIL - 1), m = tail[i].joint.matrixWorld;
       const th = r < TAIL ? 0 : (r - TAIL + 1) / CAP * PI / 2;      // anneaux du bout : une demi-sphère
@@ -698,6 +753,7 @@ function createKitten() {
     earBack: 0, mouth: 0,
     tailUp: 0.4, tailWag: 0.3, tailWrap: 0, tailFluff: 0,
     paw: 0, wiggle: 0, run: 0,
+    brow: 0, lidTop: 0, smile: 0.35,   // expression : inclinaison des paupières (+ malicieux, - inquiet), paupière mi-close, sourire
   };
   const K = {
     root, hips, head, nose, x: 0, prevX: 0, prevZ: 0, phase: 0, move: 0, speed: 0, vs: 0, avoid: 0, steer: 0,
@@ -768,15 +824,16 @@ function createKitten() {
     /* Allure : au pas, l'échine ondule et les hanches roulent ; au galop, le dos
        se ramasse (pattes regroupées) puis se détend (pattes en extension). */
     const bunch = Math.cos(ph) * run;
-    hipY += Math.cos(ph * 2) * 0.007 * walk + bunch * 0.035 + Math.max(0, Math.sin(ph - 1.0)) * 0.07 * run;
+    hipY += Math.cos(ph * 2) * 0.016 * walk + bunch * 0.035 + Math.max(0, Math.sin(ph - 1.0)) * 0.07 * run;
     pitch += -Math.sin(ph) * 0.07 * run;
     const wig = Math.sin(t * 15) * p.wiggle;                                 // dandinement avant le bond
-    chestG.rotation.set(bunch * 0.17 + 0.18 * p.sit, -Math.sin(ph) * 0.08 * walk, -Math.sin(ph) * 0.04 * walk);
+    chestG.rotation.set(bunch * 0.17 + 0.18 * p.sit, -Math.sin(ph) * 0.13 * walk, -Math.sin(ph) * 0.07 * walk);
     chestG.position.y = Math.sin(ph * 2) * 0.006 * walk;
-    rumpG.rotation.set(-bunch * 0.26 + 0.12 * p.sit, Math.cos(ph) * 0.12 * walk + wig * 0.2, Math.cos(ph) * 0.05 * walk);
+    rumpG.rotation.set(-bunch * 0.26 + 0.12 * p.sit, Math.cos(ph) * 0.19 * walk + wig * 0.2, Math.cos(ph) * 0.09 * walk);
     hips.position.set(-wig * 0.008, hipY * lerp(1, p.squash, 0.7) + Math.sin(t * 2.1) * 0.004, 0);
     hips.rotation.set(pitch + p.spin, 0, p.roll + 0.22 * p.lie);
-    const sq = p.squash, inv = 1 / Math.sqrt(sq);
+    // Écrasement et étirement : le corps se tasse à chaque appui et s'allonge en l'air.
+    const sq = clamp(p.squash * (1 - Math.cos(ph * 2) * 0.03 * walk - bunch * 0.05 + clamp(p.jump, 0, 0.6) * 0.22), 0.5, 1.3), inv = 1 / Math.sqrt(sq);
     hips.scale.set(inv, sq, inv);
     const breath = 1 + Math.sin(t * lerp(2.4, 1.3, p.lie)) * 0.022;
     body.scale.set(0.2 * breath, 0.195 * breath, 0.31 * (1 - bunch * 0.1));
@@ -785,7 +842,7 @@ function createKitten() {
        garde le cap pendant que les épaules roulent. */
     neck.position.y = 0.17 - 0.1 * p.lie - 0.09 * p.air;
     neck.rotation.x = -(pitch + chestG.rotation.x) * 0.92;
-    const bob = Math.sin(ph * 2 + 0.5) * 0.02 * K.move;
+    const bob = Math.sin(ph * 2 - 0.9) * 0.04 * K.move - lean * 1.2;     // la tête dodeline, un temps après le corps
     head.rotation.set(p.headPitch + bob + 0.05 * p.lie, p.headYaw - chestG.rotation.y * 0.9, p.headRoll - p.roll * 0.35 * p.air - chestG.rotation.z);
 
     /* Collision du corps avec le sol : on mesure le point le plus bas des
@@ -813,7 +870,7 @@ function createKitten() {
       const L = legs[i], front = L.front, M = front ? _mC : _mR, inv = front ? _iC : _iR;
       // Cycle de l'allure (mélange pas / galop).
       const uW = (cyc + WALK[i]) % 1, uR = (cyc + RUN[i]) % 1;
-      footCycle(uW, 0.62, 0.17, 0.06, _fw); footCycle(uR, 0.34, 0.21, 0.11, _fr);
+      footCycle(uW, 0.62, 0.17, front ? 0.105 : 0.07, _fw); footCycle(uR, 0.34, 0.21, 0.11, _fr);
       const u = p.run > 0.5 ? uR : uW;
       if (front && u < L.u && K.move > 0.5 && K.onStep) K.onStep(p.run);     // le pied se pose : petit bruit de pas
       L.u = u;
@@ -831,6 +888,9 @@ function createKitten() {
       if (p.tuck > 0) _t.lerp(_a.set(L.pivot.x, L.pivot.y - 0.15, L.pivot.z + (front ? -0.09 : 0.09)), p.tuck);
       if (p.air > 0) _t.lerp(_a.set(L.pivot.x, L.pivot.y - 0.22 + Math.sin(t * 10 + i * 2.3) * 0.05, L.pivot.z + (front ? -0.03 : 0.05) + Math.sin(t * 10 + i * 1.9) * 0.12), p.air);
       solveLeg(L, _t.x, _t.y, _t.z);
+      // Le poignet est souple : la patte pend quand elle se lève, puis se pose à plat.
+      const free = Math.max(p.tuck, p.air);
+      L.paw.rotation.x = (gy * 9 - (L.leg.rotation.x + L.knee.rotation.x) - (pitch + L.parentG.rotation.x)) * (1 - free) + 0.5 * free;
     }
 
     /* Yeux : clignements spontanés, pupilles, regard (qui suit un peu la souris). */
@@ -843,6 +903,10 @@ function createKitten() {
     for (const e of eyes) {
       e.eye.scale.y = open;
       e.eye.rotation.z = -e.side * 0.5 * (1 - open);   // paupière close : un petit arc paisible
+      const cover = Math.max(p.lidTop, Math.abs(p.brow) * 0.32) * smooth(0.1, 0.4, open);
+      e.lid.visible = cover > 0.02;
+      e.lid.position.y = 0.125 - cover * 0.115;
+      e.lid.rotation.z = -e.side * p.brow * 0.55;
       e.pupil.scale.set(0.04 * p.pupil, 0.05 * p.pupil, 0.012);
       e.pupil.position.x = clamp(gx * 0.022 - e.side * p.cross * 0.03, -0.032, 0.032);
       e.pupil.position.y = clamp(gy * 0.02, -0.026, 0.026);
@@ -855,17 +919,18 @@ function createKitten() {
     for (const e of ears) {
       e.flick = Math.max(0, e.flick - dt * 4.5);
       const f = Math.sin(e.flick * PI * 2) * e.flick * 0.35;
-      e.ear.rotation.set(-0.75 * p.earBack, 0, -e.side * (0.3 + 0.4 * p.earBack + f));
+      e.ear.rotation.set(-0.75 * p.earBack - Math.sin(ph * 2 - 1.6) * 0.1 * K.move, 0, -e.side * (0.3 + 0.4 * p.earBack + f));   // elles rebondissent à contretemps
     }
     mouth.scale.set(0.016 + 0.008 * p.mouth, 0.004 + 0.034 * p.mouth, 0.02);
+    for (const m of smiles) m.scale.set(0.8 + 0.35 * p.smile, 0.25 + 1.0 * p.smile, 1);
 
     /* Queue : une onde parcourt la chaîne d'articulations. */
     tail[0].joint.rotation.x = lerp(-2.0, -0.35, (p.tailUp + 1) / 2) - (pitch + rumpG.rotation.x) * 0.8;
     for (let i = 1; i < tail.length; i++) {
       const j = tail[i].joint;
-      j.rotation.x = 0.068 * p.tailUp + Math.sin(t * 2.2 - i * 0.37) * 0.05 * (1 - p.lie);
+      j.rotation.x = 0.068 * p.tailUp + Math.sin(t * 2.2 - i * 0.37) * 0.07 * (1 - p.lie) + Math.sin(ph * 2 - i * 0.4) * 0.03 * K.move;
       j.rotation.z = Math.sin(t * (1.6 + 4 * p.wiggle) - i * 0.33) * p.tailWag * 0.15 + p.tailWrap * 0.2
-        - Math.sin(ph - i * 0.35) * 0.05 * K.move;      // la queue fait contrepoids à chaque pas
+        - Math.sin(ph - i * 0.35) * 0.1 * K.move;      // la queue fait contrepoids à chaque pas
     }
     skinTail(p.tailFluff);   // tailFluff : la queue en écouvillon des grandes frayeurs
   };
@@ -873,7 +938,7 @@ function createKitten() {
 }
 
 const K = createKitten();
-scene.add(K.root, K.root.userData.tailMesh);
+scene.add(K.root, ...K.root.userData.skins);
 
 /* ==========================================================================
    8. PETITS SIGNES : cœurs, « z », « ? », « ! », notes, étoiles, poussière
@@ -1404,7 +1469,7 @@ function* walkTo(x, speed = 1.1) {
 function* hop(dx, h, dur, fn) {
   const x0 = K.x;
   yield* wait(dur, k => { K.x = x0 + dx * k; K.snap({ jump: 4 * h * k * (1 - k) }); if (fn) fn(k); });
-  K.snap({ jump: 0 });
+  K.snap({ jump: 0, squash: 0.72 }); K.set({ squash: 1 });      // il s'écrase à la réception, puis reprend sa forme
 }
 /** Renvoie une fonction qui déclenche `fn` à intervalle régulier. */
 const every = (period, fn) => { let acc = period * 0.7; return (k, dt) => { acc += dt; if (acc >= period) { acc -= period; fn(); } }; };
@@ -1441,7 +1506,7 @@ function* sceneWake() {
   yield* wait(2.6, zzz);
   K.set({ eyeOpen: 0.3 }); yield* wait(1.0);                 // un œil s'entrouvre...
   K.set({ eyeOpen: 0 }); yield* wait(0.8);                   // ... non, encore cinq minutes
-  K.set({ eyeOpen: 1, headRoll: 0, headYaw: -0.9, earBack: 0 }); yield* wait(1.1);
+  K.set({ eyeOpen: 1, lidTop: 0.55, headRoll: 0, headYaw: -0.9, earBack: 0 }); yield* wait(1.1);
   // Il s'étire de tout son long en bâillant.
   K.neutral({ yaw: PI / 2, stretch: 1, mouth: 1, eyeOpen: 0.07, tailUp: 1, headPitch: -0.35 }); sfx.yawn();
   yield* wait(1.9);
@@ -1479,7 +1544,7 @@ function* sceneButterfly() {
 
   // À l'affût : il se tapit, l'arrière-train se dandine...
   shot({ dist: 4.6, height: 0.3, az: 0.32, ahead: 0.9, lift: 0.6 }, 1.2);
-  K.set({ crouch: 1, pupil: 1.45, earBack: 0.3, tailUp: -0.2, tailWag: 1 }); yield* wait(0.6);
+  K.set({ crouch: 1, pupil: 1.45, earBack: 0.3, tailUp: -0.2, tailWag: 1, brow: 0.9, smile: 0.9 }); yield* wait(0.6);
   K.set({ wiggle: 1 }); sfx.wiggle(); yield* wait(1.35);
   K.set({ wiggle: 0 }); yield* wait(0.25);
   // ... et bondit !
@@ -1492,7 +1557,7 @@ function* sceneButterfly() {
   yield* wait(0.8, k => { K.x = x0 + 0.95 * easeOut(k); K.snap({ spin: easeOut(k) * TAU, jump: Math.sin(k * PI) * 0.14 }); });
   K.snap({ spin: 0, jump: 0 }); puff(K.x, 0, 3);
   // Assis, un peu sonné.
-  K.neutral({ sit: 1, tailUp: -0.7, tailWrap: 0.4, pupil: 0.7, earBack: 0.5 });
+  K.neutral({ sit: 1, tailUp: -0.7, tailWrap: 0.4, pupil: 0.7, earBack: 0.5, brow: -0.8, smile: 0 });
   for (let i = 0; i < 3; i++) emote('star', K.x + 0.1 + i * 0.16, K.root.position.y + 1.05 + (i % 2) * 0.1, 0.1, { size: 0.12, life: 1.5, vy: 0.12, sway: 0.5 });
   yield* wait(1.4, k => K.snap({ headRoll: Math.sin(k * PI * 5) * 0.3 * (1 - k) }));
 
@@ -1501,7 +1566,7 @@ function* sceneButterfly() {
   K.set({ earBack: 0, pupil: 1.2, headRoll: 0 });
   shot({ dist: 3.2, height: 0.2, az: 0.55, ahead: 0.1, lift: 0.62 }, 1.0);
   yield* wait(1.5);
-  K.set({ cross: 1 }); yield* wait(2.1);                     // il louche dessus, longuement
+  K.set({ cross: 1, brow: -0.5 }); yield* wait(2.1);                     // il louche dessus, longuement
   // Ça chatouille... atchoum !
   sfx.sneezeIn(); K.set({ headPitch: -0.45, eyeOpen: 0.15, cross: 0, mouth: 0.5, earBack: 0.5 }); yield* wait(0.8);
   sfx.sneezeOut(); K.rate = 18; K.set({ headPitch: 0.5, eyeOpen: 0.06, mouth: 1 });
@@ -1532,7 +1597,7 @@ function* sceneVase() {
   }
   K.rate = 7;
   // Regard caméra. Long. Très long.
-  K.lookTarget = null; K.set({ headYaw: -1.15, headPitch: 0, pupil: 1 }); yield* wait(1.6);
+  K.lookTarget = null; K.set({ headYaw: -1.15, headPitch: 0, pupil: 1, brow: 0.9, lidTop: 0.3, smile: 1 }); yield* wait(1.6);
   // Et, sans nous quitter des yeux, il pousse.
   K.set({ paw: 1 }); yield* wait(0.35); sfx.scrape(0.9);
   yield* wait(0.9, k => { V.slide = easeInOut(k) * 0.17; });
@@ -1540,14 +1605,14 @@ function* sceneVase() {
   yield* until(() => V.broken, 3);
   sfx.crash(); world.shake = 0.06; puff(V.debris.x, 0.1, 6);
   // Sursaut : oreilles couchées, queue en écouvillon.
-  K.rate = 20; K.set({ earBack: 1, pupil: 0.6, tailFluff: 1, tailUp: 1, headYaw: -0.2 });
+  K.rate = 20; K.set({ earBack: 1, pupil: 0.6, tailFluff: 1, tailUp: 1, headYaw: -0.2, brow: -1, lidTop: 0, smile: 0 });
   emote('bang', ...overHead(0.1));
   yield* hop(-0.3, 0.34, 0.34);
   K.rate = 7; yield* wait(0.8);
   K.lookTarget = V.debris; K.set({ tailFluff: 0, earBack: 0.6, pupil: 1 }); yield* wait(1.3);   // il contemple les dégâts
-  K.lookTarget = null; K.set({ headYaw: -1.15, headPitch: 0, earBack: 0.3 }); yield* wait(1.2);  // puis nous
+  K.lookTarget = null; K.set({ headYaw: -1.15, headPitch: 0, earBack: 0.3, brow: -0.9 }); yield* wait(1.2);  // puis nous
   // L'air de rien : il regarde ailleurs en sifflotant.
-  K.set({ headYaw: 0.4, headPitch: -0.5, eyeOpen: 0.5, earBack: 0, gazeY: 0.9, tailWag: 1, tailUp: -0.4, mouth: 0.22 });
+  K.set({ headYaw: 0.4, headPitch: -0.5, eyeOpen: 1, lidTop: 0.5, brow: 0, smile: 0.8, earBack: 0, gazeY: 0.9, tailWag: 1, tailUp: -0.4, mouth: 0.22 });
   sfx.whistle();
   yield* wait(2.5, every(0.45, () => emote('note', K.x + 0.45, K.root.position.y + 0.95, 0.2, { size: 0.15, life: 1.3, vx: 0.25, vy: 0.3, sway: 0.3 })));
   // Et il file à l'anglaise, en contournant le socle.
@@ -1575,7 +1640,7 @@ function* sceneYarn() {
   // Course-poursuite dans la descente, tandis que le jour baisse.
   shot({ dist: 9.5, height: 0.8, az: -0.22, ahead: 2.4, lift: 1.4 }, 0.9);
   music.energy = 1; world.todGoal = 0.74; world.todRate = 0.11;
-  K.lookTarget = null; K.neutral({ run: 1, tailUp: 0.9, pupil: 1.3 });
+  K.lookTarget = null; K.neutral({ run: 1, tailUp: 0.9, pupil: 1.3, brow: 0.6, smile: 1 });
   let v = 0, chase = 0;
   while (Y.x < 42.5 && chase < 16) {
     const dt = yield; chase += dt;
@@ -1588,7 +1653,7 @@ function* sceneYarn() {
   sfx.thud(); puff(K.x); music.energy = 0.45; world.shake = 0.02;
   // ... et se retrouve sur le dos, la pelote entre les pattes.
   shot({ dist: 4.2, height: 0.35, az: 0.3, ahead: 0, lift: 0.55 }, 1.2);
-  Y.held = true; K.neutral({ air: 1, roll: -2.3, tailWag: 1 }); sfx.purr(true);
+  Y.held = true; K.neutral({ air: 1, roll: -2.3, tailWag: 1, smile: 1, lidTop: 0.25 }); sfx.purr(true);
   const hearts = every(1.3, () => emote('heart', K.x + rand(-0.2, 0.2), K.root.position.y + 0.8, 0.2, { color: CORAL, size: 0.15, life: 2.2, vy: 0.4, sway: 0.25 }));
   yield* wait(4.2, (k, dt) => { K.set({ roll: -2.3 + Math.sin(time * 3.2) * 0.3 }); if (k > 0.3) hearts(k, dt); });
   // La pelote lui échappe ; il se remet d'aplomb.
@@ -1621,7 +1686,7 @@ function* sceneMoon() {
   yield* wait(2.8);
   K.lookTarget = null; K.set({ cross: 1, headYaw: -0.25, headPitch: 0 }); sfx.sparkle(); yield* wait(2.0);
   // Ronron, yeux mi-clos, et quelques petits cœurs.
-  K.set({ eyeOpen: 0.1, cross: 0, earBack: 0.2, headRoll: 0.15 }); sfx.purr(true);
+  K.set({ eyeOpen: 0.1, cross: 0, earBack: 0.2, headRoll: 0.15, smile: 1 }); sfx.purr(true);
   yield* wait(5.5, every(0.75, () => { emote('heart', K.x + rand(-0.25, 0.3), K.root.position.y + 1.0, 0.25, { color: CORAL, size: rand(0.13, 0.2), life: 2.6, vy: 0.42, sway: 0.3 }); sfx.pop(1 + Math.random() * 0.5); }));
   // La luciole repart rejoindre les autres ; il la suit des yeux.
   F.aim = v => v.set(K.x + 1.5, K.root.position.y + 3.4, -2.5);
