@@ -204,11 +204,23 @@ function canvasTexture(size, draw) {
   const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }
-const softDot = canvasTexture(64, (g, s) => {
-  const grad = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
-  grad.addColorStop(0, 'rgba(255,255,255,1)'); grad.addColorStop(0.35, 'rgba(255,255,255,.55)');
-  grad.addColorStop(1, 'rgba(255,255,255,0)');
-  g.fillStyle = grad; g.fillRect(0, 0, s, s);
+/** Texture blanche dont seule la transparence varie, écrite octet par octet.
+    (Un canvas 2D stocke ses couleurs prémultipliées : sur iPhone, les zones
+    presque transparentes en ressortent avec des pixels de couleurs parasites.) */
+function alphaTexture(size, alphaAt) {
+  const d = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const o = (y * size + x) * 4;
+    d[o] = d[o + 1] = d[o + 2] = 255; d[o + 3] = Math.round(255 * clamp(alphaAt((x + 0.5) / size, (y + 0.5) / size), 0, 1));
+  }
+  const tex = new THREE.DataTexture(d, size, size, THREE.RGBAFormat);
+  tex.colorSpace = THREE.SRGBColorSpace; tex.magFilter = tex.minFilter = THREE.LinearFilter; tex.needsUpdate = true;
+  return tex;
+}
+// Pastille douce : pleine au centre, fondue vers le bord.
+const softDot = alphaTexture(128, (u, v) => {
+  const r = Math.hypot(u - 0.5, v - 0.5) * 2;
+  return r < 0.35 ? lerp(1, 0.55, r / 0.35) : lerp(0.55, 0, smooth(0.35, 1, r) * 0.6 + (r - 0.35) / 0.65 * 0.4);
 });
 
 /* --- Astre : soleil pâle le jour, grande lune la nuit --------------------- */
@@ -313,11 +325,7 @@ LAYERS.forEach((L, i) => {
 }
 
 /* Nappes de brume couchées entre les plans : elles détachent les crêtes. */
-const mistTex = canvasTexture(64, (g, s) => {
-  const grad = g.createLinearGradient(0, 0, 0, s);
-  grad.addColorStop(0, 'rgba(255,255,255,0)'); grad.addColorStop(0.55, 'rgba(255,255,255,.75)'); grad.addColorStop(1, 'rgba(255,255,255,.95)');
-  g.fillStyle = grad; g.fillRect(0, 0, s, s);
-});
+const mistTex = alphaTexture(64, (u, v) => { const k = 1 - v; return k < 0.55 ? 0.75 * k / 0.55 : lerp(0.75, 0.95, (k - 0.55) / 0.45); });   // transparente en haut, dense en bas
 const mistMat = new THREE.MeshBasicMaterial({ map: mistTex, transparent: true, opacity: 0.5, depthWrite: false, fog: false });
 const mists = [];
 for (let i = 0; i < 4; i++) {
@@ -680,27 +688,39 @@ function createKitten() {
 
   // Yeux : très grands, presque tout en iris, avec pupille ronde et deux reflets.
   // C'est le regard qui rend le personnage attachant : on le soigne.
-  const irisMat = new THREE.MeshStandardMaterial({ color: 0xa8cc2a, roughness: 0.25 });
-  const hazelMat = new THREE.MeshStandardMaterial({ color: 0xcfe85a, roughness: 0.3 });
-  const rimMat = new THREE.MeshBasicMaterial({ color: 0x3f5210 });
+  // Chaque œil est un seul globe lisse, enfoncé dans la tête : iris, pupille et reflets
+  // sont peints dessus. Vu de face comme de profil, rien ne dépasse ni ne se décolle.
+  const eyeCv = document.createElement('canvas'); eyeCv.width = 512; eyeCv.height = 256;
+  const eyeCtx = eyeCv.getContext('2d');
+  const eyeTex = new THREE.CanvasTexture(eyeCv); eyeTex.colorSpace = THREE.SRGBColorSpace; eyeTex.anisotropy = 4;
+  let eyePaint = -1;
+  /** Repeint l'iris ; `pupil` < 1 : pupille fendue, > 1 : pupille ronde et dilatée. */
+  function paintEye(pupil) {
+    const key = Math.round(pupil * 40); if (key === eyePaint) return; eyePaint = key;
+    const g = eyeCtx, cx = 128, cy = 128, R = 256 / PI;          // le centre du regard est à u = 0,25 ; R : pixels par radian
+    g.fillStyle = '#2f3d0c'; g.fillRect(0, 0, 512, 256);         // pourtour sombre
+    const grad = g.createRadialGradient(cx, cy, R * 0.3, cx, cy, R * 0.98);
+    grad.addColorStop(0, '#d9f065'); grad.addColorStop(0.55, '#a9cf2c'); grad.addColorStop(1, '#6f9217');
+    g.fillStyle = grad; g.beginPath(); g.arc(cx, cy, R * 0.98, 0, TAU); g.fill();
+    const pw = pupil < 1 ? Math.pow(Math.max(pupil, 0.3), 2.4) : Math.min(pupil, 1.25), ph = clamp(pupil, 0.85, 1.25);
+    g.fillStyle = '#050505'; g.beginPath(); g.ellipse(cx, cy, R * 0.6 * pw, R * 0.66 * ph, 0, 0, TAU); g.fill();
+    g.fillStyle = '#ffffff';
+    g.beginPath(); g.arc(cx + R * 0.3, cy - R * 0.36, R * 0.2, 0, TAU); g.fill();
+    g.beginPath(); g.arc(cx - R * 0.3, cy + R * 0.34, R * 0.09, 0, TAU); g.fill();
+    eyeTex.needsUpdate = true;
+  }
+  paintEye(1);
+  eyeMat.map = eyeTex; eyeMat.emissiveMap = eyeTex; eyeMat.color.set(0xffffff); eyeMat.emissive.set(0xffffff);
+  const eyeGeo = new THREE.SphereGeometry(1, 40, 28); eyeGeo.rotateY(TAU * 0.25 - PI / 2);   // amène le centre peint (u = 0,25) face à +Z
   const shutGeo = new THREE.TorusGeometry(0.062, 0.0045, 6, 22, PI * 0.72); shutGeo.rotateZ(PI + PI * 0.14);
   const shutMat = new THREE.MeshBasicMaterial({ color: 0x4b4b55 });
   const eyes = [];
   for (const s of [1, -1]) {
-    const eye = new THREE.Group(); eye.position.set(s * 0.118, 0.058, 0.243); eye.rotation.y = s * 0.42;
-    blob(eye, eyeMat, 0.084, 0.09, 0.024, 0, 0, 0, false);   // fond de l'œil, du même vert que l'iris : jamais d'aplat blanc
-    const look = new THREE.Group(); eye.add(look);                      // tout ce qui bouge avec le regard
-    blob(look, rimMat, 0.075, 0.081, 0.018, 0, 0, 0.016, false);        // cerne sombre de l'iris
-    blob(look, irisMat, 0.068, 0.074, 0.018, 0, 0, 0.019, false);
-    blob(look, hazelMat, 0.057, 0.064, 0.014, 0, 0, 0.024, false);       // halo plus clair autour de la pupille
-    const pupil = blob(look, black, 0.046, 0.053, 0.01, 0, 0, 0.03, false);
-    blob(look, glintMat, 0.02, 0.02, 0.006, 0.024, 0.032, 0.038, false);
-    blob(look, glintMat, 0.009, 0.009, 0.004, -0.022, -0.026, 0.038, false);
-    // Paupière : une coque de pelage qui descend sur l'œil et s'incline (c'est elle qui fait l'expression).
-    const lid = blob(eye, fur, 0.094, 0.1, 0.046, 0, 0.15, 0, false);
+    const eye = new THREE.Group(); eye.position.set(s * 0.118, 0.058, 0.236); eye.rotation.y = s * 0.42;
+    const look = new THREE.Mesh(eyeGeo, eyeMat); look.scale.set(0.088, 0.094, 0.054); look.rotation.order = 'YXZ'; eye.add(look);
     // Œil fermé : l'œil disparaît entièrement, il ne reste qu'un fin trait courbe dans le pelage.
     const shut = new THREE.Mesh(shutGeo, shutMat); shut.position.set(s * 0.126, 0.05, 0.262); shut.rotation.y = s * 0.42; shut.visible = false; head.add(shut);
-    head.add(eye); eyes.push({ eye, look, pupil, lid, shut, side: s });
+    head.add(eye); eyes.push({ eye, look, shut, side: s });
   }
 
   // Oreilles : cônes à pointe arrondie (géométrie de révolution).
@@ -1092,13 +1112,11 @@ function createKitten() {
       e.eye.visible = open > 0.2; e.shut.visible = !e.eye.visible;   // fermé : plus aucune couleur visible
       e.shut.rotation.z = -e.side * 0.12;
       e.eye.rotation.z = -e.side * (0.5 * (1 - open) + 0.1 * p.brow);   // paupière close : un petit arc paisible
-      e.lid.visible = false;
-      // Pupille ronde et immense quand il est attendri ou joueur, fendue quand il a peur ou se concentre.
-      e.pupil.scale.set(0.042 * (p.pupil < 1 ? Math.pow(Math.max(p.pupil, 0.3), 2.4) : Math.min(p.pupil, 1.25)), 0.049 * clamp(p.pupil, 0.85, 1.25), 0.01);
-      e.look.position.x = clamp(gx * 0.02 - e.side * p.cross * 0.026, -0.024, 0.024);
-      e.look.position.y = clamp(gy * 0.018, -0.02, 0.02);
+      // Le regard : le globe pivote légèrement dans son orbite.
+      e.look.rotation.set(-clamp(gy, -1, 1) * 0.2, clamp(gx - e.side * p.cross * 1.3, -1.3, 1.3) * 0.24, 0);
     }
-    eyeMat.emissiveIntensity = 0.1 + 0.45 * smooth(0.6, 1, world.tod);   // les yeux luisent la nuit
+    paintEye(p.pupil);   // pupille ronde et immense quand il est attendri ou joueur, fendue quand il a peur
+    eyeMat.emissiveIntensity = 0.08 + 0.35 * smooth(0.6, 1, world.tod);   // les yeux luisent la nuit
 
     /* Oreilles : se couchent sous l'émotion, tressaillent de temps en temps. */
     // Inertie : les oreilles traînent derrière les mouvements de la tête et du corps.
