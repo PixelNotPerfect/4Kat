@@ -455,7 +455,7 @@ const keyLight = new THREE.DirectionalLight(0xffffff, 2.6);   // contre-jour : d
 keyLight.castShadow = true;
 keyLight.shadow.mapSize.set(2048, 2048);
 Object.assign(keyLight.shadow.camera, { left: -7, right: 7, top: 7, bottom: -7, near: 0.5, far: 30 });
-keyLight.shadow.bias = -0.0005; keyLight.shadow.radius = 5;
+keyLight.shadow.bias = -0.0012; keyLight.shadow.normalBias = 0.04; keyLight.shadow.radius = 5;
 const fillLight = new THREE.DirectionalLight(0xffffff, 0.7);  // débouche le visage côté caméra
 scene.add(hemi, keyLight, keyLight.target, fillLight, fillLight.target);
 
@@ -606,6 +606,7 @@ function updateWorld(dt, t) {
    La caméra voit donc son flanc droit (-X local) quand il marche vers +X.
    ========================================================================== */
 
+const BODY_Z = 0.86;            // corps raccourci : grosse tête, petit corps, comme un chaton
 const L1 = 0.17, L2 = 0.165;   // longueurs de la cuisse (ou du bras) et de la jambe (ou de l'avant-bras)
 
 function createKitten() {
@@ -645,8 +646,8 @@ function createKitten() {
 
   /* --- Tête : grosse et ronde, comme chez tous les chatons --- */
   const neck = new THREE.Group(); neck.position.set(0, 0.17, 0.23); chestG.add(neck);
-  const head = new THREE.Group(); head.rotation.order = 'YXZ'; neck.add(head);
-  const skull = blob(head, fur, 0.25, 0.22, 0.225, 0, 0.07, 0.06);     // crâne
+  const head = new THREE.Group(); head.rotation.order = 'YXZ'; head.scale.setScalar(1.07); neck.add(head);
+  const skull = blob(head, fur, 0.255, 0.235, 0.228, 0, 0.075, 0.06);     // crâne
   blob(head, fur, 0.1, 0.09, 0.1, 0.14, -0.01, 0.1);     // joues rebondies
   blob(head, fur, 0.1, 0.09, 0.1, -0.14, -0.01, 0.1);
 
@@ -660,26 +661,23 @@ function createKitten() {
   const smileGeo = new THREE.TorusGeometry(0.021, 0.0042, 6, 14, PI); smileGeo.rotateZ(PI);
   const smiles = [1, -1].map(s => { const m = new THREE.Mesh(smileGeo, black); m.position.set(s * 0.021, -0.03, 0.31); m.rotation.y = s * 0.35; head.add(m); return m; });
 
-  // Moustaches : de fins traits blancs.
-  const whiskerGeo = new THREE.CylinderGeometry(0.0022, 0.0008, 0.2, 5); whiskerGeo.translate(0, 0.1, 0);
-  for (const s of [1, -1]) for (let i = -1; i <= 1; i++) {
-    const w = new THREE.Mesh(whiskerGeo, glintMat);
-    w.position.set(s * 0.075, -0.035 + i * 0.012, 0.275);
-    w.rotation.set(0.25, 0, -s * (PI / 2 - 0.12) + s * i * 0.24);
-    head.add(w);
-  }
-
-  // Yeux : grand globe clair, pupille ronde, petit reflet.
+  // Yeux : très grands, presque tout en iris, avec pupille ronde et deux reflets.
+  // C'est le regard qui rend le personnage attachant : on le soigne.
+  const irisMat = new THREE.MeshStandardMaterial({ color: 0x9aa5ab, roughness: 0.25 });
+  const rimMat = new THREE.MeshBasicMaterial({ color: 0x3a4348 });
   const eyes = [];
   for (const s of [1, -1]) {
-    const eye = new THREE.Group(); eye.position.set(s * 0.1, 0.085, 0.248); eye.rotation.y = s * 0.28;
-    blob(eye, eyeMat, 0.068, 0.076, 0.04, 0, 0, 0, false);
-    const pupil = blob(eye, black, 0.04, 0.05, 0.012, 0, 0, 0.034, false);
-    blob(eye, glintMat, 0.013, 0.013, 0.006, 0.018, 0.026, 0.046, false);
-    blob(eye, glintMat, 0.006, 0.006, 0.004, -0.016, -0.02, 0.046, false);
+    const eye = new THREE.Group(); eye.position.set(s * 0.115, 0.058, 0.222); eye.rotation.y = s * 0.42;
+    blob(eye, eyeMat, 0.084, 0.09, 0.03, 0, 0, 0, false);
+    const look = new THREE.Group(); eye.add(look);                      // tout ce qui bouge avec le regard
+    blob(look, rimMat, 0.075, 0.081, 0.018, 0, 0, 0.016, false);        // cerne sombre de l'iris
+    blob(look, irisMat, 0.068, 0.074, 0.018, 0, 0, 0.019, false);
+    const pupil = blob(look, black, 0.046, 0.053, 0.01, 0, 0, 0.03, false);
+    blob(look, glintMat, 0.02, 0.02, 0.006, 0.024, 0.032, 0.038, false);
+    blob(look, glintMat, 0.009, 0.009, 0.004, -0.022, -0.026, 0.038, false);
     // Paupière : une coque de pelage qui descend sur l'œil et s'incline (c'est elle qui fait l'expression).
-    const lid = blob(eye, fur, 0.078, 0.082, 0.05, 0, 0.12, 0, false);
-    head.add(eye); eyes.push({ eye, pupil, lid, side: s });
+    const lid = blob(eye, fur, 0.094, 0.1, 0.046, 0, 0.15, 0, false);
+    head.add(eye); eyes.push({ eye, look, pupil, lid, side: s });
   }
 
   // Oreilles : cônes à pointe arrondie (géométrie de révolution).
@@ -754,7 +752,7 @@ function createKitten() {
     const leg = new THREE.Group(); leg.position.set(x, -0.045, z - parentG.position.z);
     const knee = new THREE.Group(); knee.position.y = -L1;
     leg.add(knee);
-    const paw = blob(knee, fur, 0.072, 0.05, 0.09, 0, -L2 + 0.005, 0.03);   // patte ronde
+    const paw = blob(knee, fur, 0.08, 0.054, 0.098, 0, -L2 + 0.006, 0.032);   // grosse patte ronde de chaton
     parentG.add(leg);
     legs.push({ leg, knee, paw, front, parentG, pivot: leg.position.clone(), restX: x * 0.85, restZ: z, u: 0, lift: 0, skin: makeLimbSkin() });
   });
@@ -842,17 +840,22 @@ function createKitten() {
     earBack: 0, mouth: 0,
     tailUp: 0.4, tailWag: 0.3, tailWrap: 0, tailFluff: 0,
     paw: 0, wiggle: 0, run: 0,
+    lookYaw: 0, lookPitch: 0,          // petits coups d'œil spontanés, ajoutés au regard dirigé
     brow: 0, lidTop: 0, smile: 0.35,   // expression : inclinaison des paupières (+ malicieux, - inquiet), paupière mi-close, sourire
   };
   const K = {
     root, hips, head, nose, x: 0, prevX: 0, prevZ: 0, phase: 0, move: 0, speed: 0, vs: 0, avoid: 0, steer: 0,
     p: { ...defaults }, g: { ...defaults }, defaults,
-    rate: 7, lookTarget: null, lid: 1, blink: 0, blinkT: 2, flickT: 3, onStep: null,
+    rate: 7, lookTarget: null, reach: null, lid: 1, blink: 0, blinkT: 2, flickT: 3, onStep: null,
+    v: {}, lifeT: 2, lastYawGoal: 0, earLag: 0, prevY: 0, tipT: 1, tip: 0,
   };
+  /* Amortissement des ressorts, canal par canal (1 = sans dépassement). */
+  const SOFT = { headYaw: 0.5, headPitch: 0.5, headRoll: 0.45, lookYaw: 0.6, lookPitch: 0.6, sit: 0.55, crouch: 0.5, stretch: 0.6,
+    lie: 0.75, squash: 0.35, earBack: 0.4, tailUp: 0.45, tailFluff: 0.4, paw: 0.6, yaw: 0.8, smile: 0.5, brow: 0.6 };
   /** Fixe des poses visées (transition douce). */
   K.set = o => Object.assign(K.g, o);
   /** Impose des valeurs immédiatement, sans transition. */
-  K.snap = o => { Object.assign(K.g, o); Object.assign(K.p, o); };
+  K.snap = o => { Object.assign(K.g, o); Object.assign(K.p, o); for (const k in o) K.v[k] = 0; };
   /** Revient à la pose neutre (debout), en gardant position et cap. */
   K.neutral = (extra = {}) => K.set({ ...defaults, yaw: K.g.yaw, z: K.g.z, ...extra });
 
@@ -872,7 +875,27 @@ function createKitten() {
       g.headYaw = clamp(Math.atan2(_v.x, _v.z), -1.3, 1.3);
       g.headPitch = clamp(-Math.atan2(_v.y, Math.hypot(_v.x, _v.z)), -0.8, 0.7);
     }
-    for (const k in g) p[k] = damp(p[k], g[k], K.rate, dt);
+    /* Vie propre : de temps en temps, un coup d'œil ailleurs (avec un clignement). */
+    K.lifeT -= dt;
+    if (K.lifeT < 0) {
+      K.lifeT = 1.3 + Math.random() * 2.8;
+      const free = !K.lookTarget && g.eyeOpen > 0.5 && g.lie < 0.5 && g.air < 0.5;
+      g.lookYaw = free ? (Math.random() - 0.55) * (K.move > 0.5 ? 0.8 : 0.55) : 0;
+      g.lookPitch = free ? (Math.random() - 0.6) * 0.3 : 0;
+      if (free && Math.random() < 0.6) K.blink = 0.12;
+    }
+    if (Math.abs(g.headYaw - K.lastYawGoal) > 0.45) { K.blink = 0.12; K.lastYawGoal = g.headYaw; }   // on cligne en tournant la tête
+
+    /* Chaque canal rejoint sa valeur visée comme un ressort amorti : les plus
+       souples dépassent un peu puis reviennent (c'est ce « rebond » qui donne
+       du poids et de la vie), les autres se posent sans osciller. */
+    const sub = Math.max(1, Math.ceil(dt / 0.012)), h = dt / sub;
+    for (const k in g) {
+      const z = SOFT[k] ?? 1, w = K.rate * 1.7;
+      let x = p[k], v = K.v[k] || 0;
+      for (let n = 0; n < sub; n++) { v += ((g[k] - x) * w * w - 2 * z * w * v) * h; x += v * h; }
+      p[k] = x; K.v[k] = v;
+    }
 
     /* Déplacement : la phase de marche avance avec la distance parcourue. */
     const dx = K.x - K.prevX; K.prevX = K.x;
@@ -919,11 +942,11 @@ function createKitten() {
     chestG.rotation.set(bunch * 0.17 + 0.18 * p.sit, -Math.sin(ph) * 0.13 * walk, -Math.sin(ph) * 0.07 * walk);
     chestG.position.y = Math.sin(ph * 2) * 0.006 * walk;
     rumpG.rotation.set(-bunch * 0.26 + 0.12 * p.sit, Math.cos(ph) * 0.19 * walk + wig * 0.2, Math.cos(ph) * 0.09 * walk);
-    hips.position.set(-wig * 0.008, hipY * lerp(1, p.squash, 0.7) + Math.sin(t * 2.1) * 0.004, 0);
-    hips.rotation.set(pitch + p.spin, 0, p.roll + 0.22 * p.lie);
+    hips.position.set(-wig * 0.008 + Math.sin(ph) * 0.014 * walk + Math.sin(t * 0.7) * 0.006 * (1 - K.move), hipY * lerp(1, p.squash, 0.7) + Math.sin(t * 2.1) * 0.004, 0);
+    hips.rotation.set(pitch + p.spin, 0, p.roll + 0.22 * p.lie + Math.sin(ph) * 0.05 * walk);
     // Écrasement et étirement : le corps se tasse à chaque appui et s'allonge en l'air.
     const sq = clamp(p.squash * (1 - Math.cos(ph * 2) * 0.03 * walk - bunch * 0.05 + clamp(p.jump, 0, 0.6) * 0.22), 0.5, 1.3), inv = 1 / Math.sqrt(sq);
-    hips.scale.set(inv, sq, inv);
+    hips.scale.set(inv, sq, inv * BODY_Z); neck.scale.z = 1 / BODY_Z;
     const breath = 1 + Math.sin(t * lerp(2.4, 1.3, p.lie)) * 0.022;
     body.scale.set(0.2 * breath, 0.195 * breath, 0.31 * (1 - bunch * 0.1));
 
@@ -932,7 +955,10 @@ function createKitten() {
     neck.position.y = 0.17 - 0.1 * p.lie - 0.09 * p.air;
     neck.rotation.x = -(pitch + chestG.rotation.x) * 0.92;
     const bob = Math.sin(ph * 2 - 0.9) * 0.04 * K.move - lean * 1.2;     // la tête dodeline, un temps après le corps
-    head.rotation.set(p.headPitch + bob + 0.05 * p.lie, p.headYaw - chestG.rotation.y * 0.9, p.headRoll - p.roll * 0.35 * p.air - chestG.rotation.z);
+    const still = 1 - K.move;                                             // immobile : la tête flotte doucement, jamais figée
+    head.rotation.set(p.headPitch + p.lookPitch + bob + 0.05 * p.lie + Math.sin(t * 0.9) * 0.02 * still,
+      p.headYaw + p.lookYaw - chestG.rotation.y * 0.9 + Math.sin(t * 0.63 + 1) * 0.025 * still,
+      p.headRoll - p.roll * 0.35 * p.air - chestG.rotation.z + p.lookYaw * 0.25);
 
     /* Collision du corps avec le sol : on mesure le point le plus bas des
        volumes (tronc et tête). Au repos (assis, couché, sur le dos), le corps
@@ -971,7 +997,10 @@ function createKitten() {
         L.restZ + gz + (front ? 0.22 * p.stretch + 0.12 * p.lie - 0.07 * p.sit + 0.04 * p.crouch : 0.2 * p.sit + 0.12 * p.lie));
       _pv.copy(L.pivot).applyMatrix4(M);                       // épaule ou hanche, dans ce même repère
       if (flying > 0) _t.lerp(_a.set(_pv.x, _pv.y - 0.1, _pv.z + (front ? 0.27 : -0.28)), flying);   // en plein saut : pattes en extension
-      if (i === 0 && p.paw > 0) _t.lerp(_a.set(_pv.x * 0.6, _pv.y + 0.08, _pv.z + 0.3), p.paw);       // patte tendue vers l'avant
+      if (i === 0 && p.paw > 0) {                               // patte tendue : vers l'objet visé, s'il y en a un
+        if (K.reach) yawG.worldToLocal(_a.copy(K.reach)); else _a.set(_pv.x * 0.6, _pv.y + 0.08, _pv.z + 0.3);
+        _t.lerp(_a, clamp(p.paw, 0, 1.15));
+      }
       _t.applyMatrix4(inv);                                    // vers le repère du demi-tronc
       // Poses où les pattes ne touchent plus terre : en boule, ou sur le dos à pédaler.
       if (p.tuck > 0) _t.lerp(_a.set(L.pivot.x, L.pivot.y - 0.15, L.pivot.z + (front ? -0.09 : 0.09)), p.tuck);
@@ -988,38 +1017,46 @@ function createKitten() {
     K.blink = Math.max(0, K.blink - dt);
     K.lid = damp(K.lid, K.blink > 0 ? 0.06 : 1, 38, dt);
     const open = Math.max(0.055, p.eyeOpen * K.lid);
-    const gx = p.gazeX + mouse.sx * Math.cos(p.yaw + p.headYaw) * 0.5, gy = p.gazeY - mouse.sy * 0.35;
+    // Les yeux partent avant la tête : ils visent déjà la cible pendant qu'elle tourne.
+    const gx = p.gazeX + mouse.sx * Math.cos(p.yaw + p.headYaw) * 0.5 + clamp((g.headYaw + g.lookYaw - p.headYaw - p.lookYaw) * 1.6, -1, 1);
+    const gy = p.gazeY - mouse.sy * 0.35 - clamp((g.headPitch + g.lookPitch - p.headPitch - p.lookPitch) * 1.6, -1, 1);
     for (const e of eyes) {
       e.eye.scale.y = open;
       e.eye.rotation.z = -e.side * 0.5 * (1 - open);   // paupière close : un petit arc paisible
       const cover = Math.max(p.lidTop, Math.abs(p.brow) * 0.32) * smooth(0.1, 0.4, open);
       e.lid.visible = cover > 0.02;
-      e.lid.position.y = 0.125 - cover * 0.115;
-      e.lid.rotation.z = -e.side * p.brow * 0.55;
-      e.pupil.scale.set(0.04 * p.pupil, 0.05 * p.pupil, 0.012);
-      e.pupil.position.x = clamp(gx * 0.022 - e.side * p.cross * 0.03, -0.032, 0.032);
-      e.pupil.position.y = clamp(gy * 0.02, -0.026, 0.026);
+      e.lid.position.y = 0.155 - cover * 0.14;
+      e.lid.rotation.z = -e.side * p.brow * 0.42;
+      e.pupil.scale.set(0.046 * Math.min(p.pupil, 1.35), 0.053 * Math.min(p.pupil, 1.35), 0.01);
+      e.look.position.x = clamp(gx * 0.02 - e.side * p.cross * 0.026, -0.024, 0.024);
+      e.look.position.y = clamp(gy * 0.018, -0.02, 0.02);
     }
     eyeMat.emissiveIntensity = 0.12 + 0.6 * smooth(0.6, 1, world.tod);   // les yeux luisent la nuit
 
     /* Oreilles : se couchent sous l'émotion, tressaillent de temps en temps. */
+    // Inertie : les oreilles traînent derrière les mouvements de la tête et du corps.
+    const vy = dt > 0 ? (root.position.y - K.prevY) / dt : 0; K.prevY = root.position.y;
+    K.earLag = damp(K.earLag, clamp((K.v.headPitch || 0) * 0.07 + vy * 0.14, -0.5, 0.5), 12, dt);
     K.flickT -= dt;
     if (K.flickT < 0) { ears[Math.random() < 0.5 ? 0 : 1].flick = 1; K.flickT = 2 + Math.random() * 5; }
     for (const e of ears) {
       e.flick = Math.max(0, e.flick - dt * 4.5);
       const f = Math.sin(e.flick * PI * 2) * e.flick * 0.35;
-      e.ear.rotation.set(-0.75 * p.earBack - Math.sin(ph * 2 - 1.6) * 0.1 * K.move, 0, -e.side * (0.3 + 0.4 * p.earBack + f));   // elles rebondissent à contretemps
+      e.ear.rotation.set(-0.75 * p.earBack - Math.sin(ph * 2 - 1.6) * 0.1 * K.move + K.earLag, 0, -e.side * (0.3 + 0.4 * p.earBack + f));   // elles rebondissent à contretemps
     }
     mouth.scale.set(0.016 + 0.008 * p.mouth, 0.004 + 0.034 * p.mouth, 0.02);
     for (const m of smiles) m.scale.set(0.8 + 0.35 * p.smile, 0.25 + 1.0 * p.smile, 1);
 
     /* Queue : une onde parcourt la chaîne d'articulations. */
+    K.tipT -= dt; if (K.tipT < 0) { K.tipT = 0.8 + Math.random() * 2.5; K.tip = 1; }       // le bout de la queue tressaille
+    K.tip = Math.max(0, K.tip - dt * 2.2);
     tail[0].joint.rotation.x = lerp(-2.0, -0.35, (p.tailUp + 1) / 2) - (pitch + rumpG.rotation.x) * 0.8;
     for (let i = 1; i < tail.length; i++) {
       const j = tail[i].joint;
-      j.rotation.x = 0.068 * p.tailUp + Math.sin(t * 2.2 - i * 0.37) * 0.07 * (1 - p.lie) + Math.sin(ph * 2 - i * 0.4) * 0.03 * K.move;
+      j.rotation.x = clamp(-vy * 0.03, -0.07, 0.07) + 0.068 * p.tailUp + Math.sin(t * 2.2 - i * 0.37) * 0.07 * (1 - p.lie) + Math.sin(ph * 2 - i * 0.4) * 0.03 * K.move;
       j.rotation.z = Math.sin(t * (1.6 + 4 * p.wiggle) - i * 0.33) * p.tailWag * 0.15 + p.tailWrap * 0.2
-        - Math.sin(ph - i * 0.35) * 0.1 * K.move;      // la queue fait contrepoids à chaque pas
+        - Math.sin(ph - i * 0.35) * 0.1 * K.move
+        + (i > tail.length - 7 ? Math.sin(K.tip * 9) * K.tip * 0.16 : 0);      // la queue fait contrepoids à chaque pas
     }
     skinTail(p.tailFluff);   // tailFluff : la queue en écouvillon des grandes frayeurs
   };
@@ -1547,12 +1584,22 @@ function* wait(sec, fn) { let t = 0; while (t < sec) { const dt = yield; t += dt
 function* until(cond, max = 8) { let t = 0; while (!cond() && t < max) t += yield; }
 /** Fait marcher le chaton jusqu'à l'abscisse x. */
 function* walkTo(x, speed = 1.1) {
-  let v = 0; const dir = Math.sign(x - K.x) || 1;
+  const dir = Math.sign(x - K.x) || 1;
+  // Anticipation : il se ramasse un instant avant de partir.
+  if (K.speed < 0.1 && Math.abs(x - K.x) > 0.8) { K.set({ crouch: 0.4 }); yield* wait(0.16); K.set({ crouch: 0 }); }
+  let v = 0, skipIn = 1.5 + Math.random() * 2, skip = 0;
   while ((x - K.x) * dir > 0.005) {
     const dt = yield, rem = Math.abs(x - K.x);
-    v = damp(v, Math.min(speed, 0.35 + rem * 3), 5, dt);
+    // L'allure n'est jamais parfaitement régulière.
+    const pace = speed * (1 + 0.1 * Math.sin(time * 2.3) + 0.06 * Math.sin(time * 5.1 + 1));
+    v = damp(v, Math.min(pace, 0.35 + rem * 3), 5, dt);
     K.x += dir * Math.min(v * dt, rem);
+    // De temps en temps, un petit sautillement de chaton.
+    skipIn -= dt;
+    if (skipIn < 0 && rem > 1 && K.p.run < 0.3) { skipIn = 2.2 + Math.random() * 2.6; skip = 0.3; }
+    if (skip > 0) { skip -= dt; K.snap({ jump: Math.max(0, Math.sin((1 - skip / 0.3) * PI)) * 0.075 }); if (skip <= 0) K.snap({ jump: 0, squash: 0.86 }), K.set({ squash: 1 }); }
   }
+  K.snap({ jump: 0 });
 }
 /** Un bond : avance de dx en décrivant une cloche de hauteur h. */
 function* hop(dx, h, dur, fn) {
@@ -1580,7 +1627,7 @@ const zzz = every(1.5, () => emote('z', ...overHead(0.05), { size: 0.17, life: 2
 function resetWorld(sceneIndex = 1) {
   const starts = [{ x: X_START, tod: 0 }, { x: 0.2, tod: 0.08 }, { x: 9.5, tod: 0.25 }, { x: 18.5, tod: 0.42 }, { x: 45.5, tod: 0.74 }];
   const s = starts[sceneIndex - 1];
-  K.x = K.prevX = s.x; K.lookTarget = null; K.rate = 7;
+  K.x = K.prevX = s.x; K.lookTarget = null; K.reach = null; K.rate = 7;
   K.snap({ ...K.defaults, ...(sceneIndex === 1 ? SLEEP : {}) });
   world.tod = world.todGoal = s.tod; world.todRate = 0.2; world.moon = 0; world.shake = 0;
   F.amount = F.level = 0; F.heroOn = 0; F.aim = null;
@@ -1624,9 +1671,9 @@ function* sceneButterfly() {
   B.aim = v => v.set(K.x + 0.62 + Math.sin(time * 1.7) * 0.12, gy(K.x) + 0.72 + Math.sin(time * 2.3) * 0.1, 0.22);
   K.set({ headRoll: 0 }); yield* wait(1.7);
   // Coup de patte... dans le vide.
-  K.rate = 15; K.set({ paw: 1 }); sfx.swish(); yield* wait(0.2);
+  K.reach = B.group.position; K.rate = 15; K.set({ paw: 1, stretch: 0.25 }); sfx.swish(); yield* wait(0.2);
   B.aim = v => v.set(K.x + 0.95, gy(K.x) + 1.3, 0.2);
-  K.set({ paw: 0 }); yield* wait(0.6); K.rate = 7;
+  K.set({ paw: 0, stretch: 0, headRoll: -0.2 }); yield* wait(0.6); K.rate = 7; K.reach = null; K.set({ headRoll: 0 });
   // Le papillon va se poser un peu plus loin, l'air de rien.
   B.flutter = 0.35; B.aim = v => v.set(X_BUTTERFLY + 1.8, gy(X_BUTTERFLY + 1.8) + 0.3, 0.1);
   yield* wait(1.0);
@@ -1679,6 +1726,8 @@ function* sceneVase() {
   emote('what', ...overHead()); sfx.pop(0.8);
   yield* wait(1.3); K.set({ headRoll: 0.3 }); yield* wait(0.9); K.set({ headRoll: 0 });
   // Tap. Tap. Le vase vacille.
+  const touch = new THREE.Vector3(X_VASE - 0.15, V.lookPoint.y - 0.14, 0.04);   // le flanc du vase, côté chaton
+  K.reach = touch;
   for (const amp of [0.09, 0.2]) {
     K.rate = 16; K.set({ paw: 1 }); yield* wait(0.17);
     V.wobble = amp; sfx.tink(amp * 5); K.set({ paw: 0 });
@@ -1689,10 +1738,10 @@ function* sceneVase() {
   K.lookTarget = null; K.set({ headYaw: -1.15, headPitch: 0, pupil: 1, brow: 0.9, lidTop: 0.3, smile: 1 }); yield* wait(1.6);
   // Et, sans nous quitter des yeux, il pousse.
   K.set({ paw: 1 }); yield* wait(0.35); sfx.scrape(0.9);
-  yield* wait(0.9, k => { V.slide = easeInOut(k) * 0.17; });
+  yield* wait(0.9, k => { V.slide = easeInOut(k) * 0.17; touch.x = X_VASE - 0.15 + V.slide; });
   V.fall(); K.set({ paw: 0 });
   yield* until(() => V.broken, 3);
-  sfx.crash(); world.shake = 0.06; puff(V.debris.x, 0.1, 6);
+  K.reach = null; sfx.crash(); world.shake = 0.06; puff(V.debris.x, 0.1, 6);
   // Sursaut : oreilles couchées, queue en écouvillon.
   K.rate = 20; K.set({ earBack: 1, pupil: 0.6, tailFluff: 1, tailUp: 1, headYaw: -0.2, brow: -1, lidTop: 0, smile: 0 });
   emote('bang', ...overHead(0.1));
@@ -1721,9 +1770,9 @@ function* sceneYarn() {
   shot({ dist: 4.6, height: 0.3, az: 0.3, ahead: 0.5, lift: 0.6 }, 1.0);
   K.set({ headRoll: -0.3 }); yield* wait(1.0); K.set({ headRoll: 0.3 }); yield* wait(0.8); K.set({ headRoll: 0 });
   // Un tout petit coup de patte...
-  K.rate = 16; K.set({ paw: 1 }); yield* wait(0.17);
+  K.reach = Y.pos; K.rate = 16; K.set({ paw: 1 }); yield* wait(0.17);
   Y.free = true; Y.v = 1.7; sfx.pat(); K.set({ paw: 0 }); K.rate = 7;
-  yield* wait(1.0);                                            // ... et elle s'en va toute seule !
+  yield* wait(1.0); K.reach = null;                            // ... et elle s'en va toute seule !
   emote('bang', ...overHead()); sfx.pop(1.3); K.set({ pupil: 1.45, crouch: 0.6 }); yield* wait(0.4);
 
   // Course-poursuite dans la descente, tandis que le jour baisse.
@@ -1884,7 +1933,7 @@ renderer.setAnimationLoop(() => {
 
 /* Petit accès de mise au point (console) : avancer le temps sans attendre. */
 document.getElementById('error').style.display = 'none';
-window.__debug = { manual: false, togglePause, get paused() { return paused; }, get time() { return time; }, step, start, audio, music, world, cam, camGoal, K, render: () => renderer.render(scene, camera) };
+window.__debug = { manual: false, togglePause, get paused() { return paused; }, get time() { return time; }, step, start, audio, music, world, cam, camGoal, K, camera, render: () => renderer.render(scene, camera) };
 </script>
 <script>
   /* Si le module n'a pas pu se charger (pas de réseau), on l'explique. */
