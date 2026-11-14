@@ -526,14 +526,16 @@ function updateCamera(dt, t, snap = false) {
   camTarget.y = r ? ty : damp(camTarget.y, ty, 1.8, dt);
 
   // En format portrait on recule pour garder le chaton et son décor dans le cadre.
-  const d = cam.dist * clamp(1.45 / camera.aspect, 1, 2.3);
+  // On recule moins qu'avant, et on vise plus haut : le chaton reste grand, posé dans le tiers bas, sous un grand ciel.
+  const port = smooth(1.25, 0.6, camera.aspect);
+  const d = cam.dist * clamp(1.1 / camera.aspect, 1, 1.5);
   // Lente respiration de l'angle + parallaxe doux piloté par la souris.
   const az = cam.az + Math.sin(t * 0.11) * 0.05 + mouse.sx * 0.11;
   camera.position.set(
     camTarget.x + Math.sin(az) * d + mouse.sx * 0.3,
     camTarget.y + cam.height + Math.sin(t * 0.17) * 0.05 - mouse.sy * 0.28,
     Math.cos(az) * d);
-  camera.lookAt(camTarget.x - mouse.sx * 0.12, camTarget.y + mouse.sy * 0.06, 0);
+  camera.lookAt(camTarget.x - mouse.sx * 0.12, camTarget.y + mouse.sy * 0.06 + port * 0.11 * d, 0);
   camera.rotation.z += Math.sin(t * 0.13) * 0.004 + mouse.sx * 0.005;
   // Petite secousse lors des chocs (le vase, les atterrissages ratés).
   world.shake = damp(world.shake, 0, 7, dt);
