@@ -182,13 +182,12 @@ const skyMat = new THREE.ShaderMaterial({
   uniforms: { top: { value: new THREE.Color() }, bottom: { value: new THREE.Color() } },
   vertexShader: /* glsl */`
     varying vec2 vUv;
-    void main() { vUv = uv; gl_Position = vec4(position.xy, 1.0, 1.0); }`,
+    void main() { vUv = uv; gl_Position = vec4(position.xy, 0.999, 1.0); }`,
   fragmentShader: /* glsl */`
+    precision highp float;
     uniform vec3 top; uniform vec3 bottom; varying vec2 vUv;
     void main() {
       vec3 c = mix(bottom, top, smoothstep(0.3, 1.0, vUv.y));
-      // léger tramage pour éviter les bandes dans le dégradé
-      c += (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
       gl_FragColor = vec4(c, 1.0);
       #include <colorspace_fragment>
     }`,
