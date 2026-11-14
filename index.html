@@ -232,13 +232,6 @@ const starsGeo = new THREE.BufferGeometry();
 }
 const starsMat = new THREE.PointsMaterial({ color: 0xffffff, size: 2.2, sizeAttenuation: false, map: softDot, transparent: true, opacity: 0, fog: false, depthWrite: false });
 const stars = new THREE.Points(starsGeo, starsMat);
-{ // une poussière d'étoiles plus fines, resserrée en une traînée oblique
-  const pos = [];
-  for (let i = 0; i < 900; i++) { const u = rand(-150, 150); pos.push(u, 38 + u * 0.16 + (rnd() + rnd() + rnd() - 1.5) * 16, -131); }
-  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  const dust = new THREE.Points(g, new THREE.PointsMaterial({ color: 0xcfd8ff, size: 1.2, sizeAttenuation: false, transparent: true, opacity: 0, fog: false, depthWrite: false }));
-  dust.frustumCulled = false; stars.add(dust); stars.userData.dust = dust.material;
-}
 stars.frustumCulled = false;
 scene.add(stars);
 
@@ -447,6 +440,7 @@ motesGeo.setAttribute('position', new THREE.BufferAttribute(motePos, 3));
 const motesMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.075, map: softDot, transparent: true, opacity: 0.6, depthWrite: false, fog: false });
 const motes = new THREE.Points(motesGeo, motesMat);
 motes.frustumCulled = false;
+motes.visible = false;   // poussières désactivées : elles scintillaient en couleurs sur certains téléphones
 scene.add(motes);
 
 /* --- Lumières --------------------------------------------------------------- */
@@ -494,7 +488,7 @@ function applyPalette() {
   astroHalo.material.color.copy(astroDisc.material.color); astroGlow.material.color.copy(astroDisc.material.color);
   mistMat.color.copy(scene.fog.color);
   flowerMat.color.copy(groundMat.color).lerp(_c1.setHex(0xffffff), 0.6);
-  starsMat.opacity = lerp(A.stars, B.stars, k); stars.userData.dust.opacity = starsMat.opacity * 0.7;
+  starsMat.opacity = lerp(A.stars, B.stars, k); stars.visible = starsMat.opacity > 0.02;   // aucune étoile en plein jour
   mixHex(keyLight.color, A.kc, B.kc, k); keyLight.intensity = lerp(A.key, B.key, k);
   mixHex(hemi.color, A.hs, B.hs, k); mixHex(hemi.groundColor, A.hg, B.hg, k); hemi.intensity = lerp(A.hemi, B.hemi, k);
   fillLight.color.copy(hemi.color);
@@ -688,6 +682,8 @@ function createKitten() {
   const irisMat = new THREE.MeshStandardMaterial({ color: 0xa8cc2a, roughness: 0.25 });
   const hazelMat = new THREE.MeshStandardMaterial({ color: 0xcfe85a, roughness: 0.3 });
   const rimMat = new THREE.MeshBasicMaterial({ color: 0x3f5210 });
+  const shutGeo = new THREE.TorusGeometry(0.062, 0.0045, 6, 22, PI * 0.72); shutGeo.rotateZ(PI + PI * 0.14);
+  const shutMat = new THREE.MeshBasicMaterial({ color: 0x4b4b55 });
   const eyes = [];
   for (const s of [1, -1]) {
     const eye = new THREE.Group(); eye.position.set(s * 0.118, 0.058, 0.243); eye.rotation.y = s * 0.42;
@@ -701,7 +697,9 @@ function createKitten() {
     blob(look, glintMat, 0.009, 0.009, 0.004, -0.022, -0.026, 0.038, false);
     // Paupière : une coque de pelage qui descend sur l'œil et s'incline (c'est elle qui fait l'expression).
     const lid = blob(eye, fur, 0.094, 0.1, 0.046, 0, 0.15, 0, false);
-    head.add(eye); eyes.push({ eye, look, pupil, lid, side: s });
+    // Œil fermé : l'œil disparaît entièrement, il ne reste qu'un fin trait courbe dans le pelage.
+    const shut = new THREE.Mesh(shutGeo, shutMat); shut.position.set(s * 0.126, 0.05, 0.262); shut.rotation.y = s * 0.42; shut.visible = false; head.add(shut);
+    head.add(eye); eyes.push({ eye, look, pupil, lid, shut, side: s });
   }
 
   // Oreilles : cônes à pointe arrondie (géométrie de révolution).
@@ -1090,6 +1088,8 @@ function createKitten() {
     const gy = p.gazeY - mouse.sy * 0.35 - clamp((g.headPitch + g.lookPitch - p.headPitch - p.lookPitch) * 1.6, -1, 1);
     for (const e of eyes) {
       e.eye.scale.y = open;
+      e.eye.visible = open > 0.2; e.shut.visible = !e.eye.visible;   // fermé : plus aucune couleur visible
+      e.shut.rotation.z = -e.side * 0.12;
       e.eye.rotation.z = -e.side * (0.5 * (1 - open) + 0.1 * p.brow);   // paupière close : un petit arc paisible
       e.lid.visible = false;
       // Pupille ronde et immense quand il est attendri ou joueur, fendue quand il a peur ou se concentre.
