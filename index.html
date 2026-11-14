@@ -150,7 +150,7 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0xf4f4f1, 9, 120);   // la brume fond les plans lointains dans le ciel
 
-const camera = new THREE.PerspectiveCamera(34, window.innerWidth / window.innerHeight, 0.1, 400);
+const camera = new THREE.PerspectiveCamera(34, window.innerWidth / window.innerHeight, 0.6, 300);   // plan proche éloigné : la profondeur reste précise au loin, même sur mobile
 
 /* ==========================================================================
    3. LE MONDE : relief, ciel, plans de collines, végétation
@@ -215,7 +215,7 @@ const softDot = canvasTexture(64, (g, s) => {
 const astro = new THREE.Group();
 const astroDisc = new THREE.Mesh(new THREE.CircleGeometry(1, 64), new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false }));
 const astroHalo = new THREE.Sprite(new THREE.SpriteMaterial({ map: softDot, color: 0xffffff, transparent: true, opacity: 0.35, fog: false, depthWrite: false }));
-astroHalo.scale.setScalar(6); astroHalo.position.z = -0.5;
+astroHalo.scale.setScalar(6); astroHalo.position.z = -2;
 // Grande lueur diffuse autour de l'astre : elle teinte tout un pan de ciel.
 const astroGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: softDot, color: 0xffffff, transparent: true, opacity: 0.3, fog: false, depthWrite: false, depthTest: false }));
 astroGlow.scale.setScalar(22); astroGlow.position.z = -1; astroGlow.renderOrder = -9;
@@ -299,7 +299,7 @@ LAYERS.forEach((L, i) => {
   const roundTree = (x, y, z, h) => { put(quad, x, y + h / 2 - 0.1, z, 0.06 * h, h); put(disc, x, y + h, z, h * rand(0.28, 0.4), h * rand(0.42, 0.58)); };
   const pine = (x, y, z, h) => { put(quad, x, y + h * 0.15, z, 0.05 * h, h * 0.4); for (let k = 0; k < 3; k++) put(tri, x, y + h * (0.18 + k * 0.24), z, h * (0.5 - k * 0.11), h * (0.5 - k * 0.06)); };
   for (let li = 0; li < 3; li++) {
-    const L = LAYERS[li], z = L.z + 0.05, size = 1 + li * 0.55;
+    const L = LAYERS[li], z = L.z + 0.6, size = 1 + li * 0.55;
     for (let x = -50; x < 125; x += rand(6, 18)) {
       const n = 1 + Math.floor(rand(4));                    // un bosquet de 1 à 4 arbres
       for (let k = 0; k < n; k++) {
@@ -309,7 +309,7 @@ LAYERS.forEach((L, i) => {
     }
   }
   const far = LAYERS[3];
-  for (let x = -60; x < 150; x += rand(14, 34)) put(disc, x, layerHeight(far, 3, x) + 0.6, far.z + 0.05, rand(0.6, 1.1), rand(2.2, 4.5));
+  for (let x = -60; x < 150; x += rand(14, 34)) put(disc, x, layerHeight(far, 3, x) + 0.6, far.z + 0.8, rand(0.6, 1.1), rand(2.2, 4.5));
 }
 
 /* Nappes de brume couchées entre les plans : elles détachent les crêtes. */
