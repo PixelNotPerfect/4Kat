@@ -614,8 +614,15 @@ function createKitten() {
   // Pelage noir : le « sheen » dépose un liseré velouté sur les contours.
   const fur = new THREE.MeshPhysicalMaterial({ color: 0x0b0b0d, roughness: 0.82, sheen: 1, sheenRoughness: 0.5, sheenColor: new THREE.Color(0xb4b4bc) });
   const earInner = new THREE.MeshStandardMaterial({ color: 0xd98f93, roughness: 0.85 });   // intérieur des oreilles : rose doux
-  const white = new THREE.MeshStandardMaterial({ color: 0xf7f7f4, roughness: 0.7 });
-  const eyeMat = new THREE.MeshStandardMaterial({ color: 0xfbfbf8, roughness: 0.2, emissive: 0xffffff, emissiveIntensity: 0.12 });
+  const CREAM = 0xf3e4c4, COAT = 0x0b0b0d;
+  const white = new THREE.MeshPhysicalMaterial({ color: CREAM, roughness: 0.85, sheen: 0.6, sheenRoughness: 0.6, sheenColor: new THREE.Color(0xffffff) });
+  // Pelage bicolore : même velours, mais la couleur vient des sommets (noir ou crème).
+  const coat = new THREE.MeshPhysicalMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.84, sheen: 0.8, sheenRoughness: 0.5, sheenColor: new THREE.Color(0xa8a8b0) });
+  const _cBlack = new THREE.Color(COAT), _cCream = new THREE.Color(CREAM), _cMix = new THREE.Color();
+  /** Écrit dans `arr` (à l'indice de sommet i) un mélange noir -> crème de poids w. */
+  const paint = (arr, i, w) => { _cMix.copy(_cBlack).lerp(_cCream, clamp(w, 0, 1)); arr[i * 3] = _cMix.r; arr[i * 3 + 1] = _cMix.g; arr[i * 3 + 2] = _cMix.b; };
+  const tongueMat = new THREE.MeshStandardMaterial({ color: 0xf08a94, roughness: 0.5 });
+  const eyeMat = new THREE.MeshStandardMaterial({ color: 0x86a81f, roughness: 0.25, emissive: 0xb9dc2e, emissiveIntensity: 0.1 });
   const black = new THREE.MeshBasicMaterial({ color: 0x000000 });
   const glintMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
   const noseMat = new THREE.MeshStandardMaterial({ color: 0xe79a9a, roughness: 0.4 });   // truffe rose
@@ -650,26 +657,45 @@ function createKitten() {
   /* --- Tête : grosse et ronde, comme chez tous les chatons --- */
   const neck = new THREE.Group(); neck.position.set(0, 0.17, 0.23); chestG.add(neck);
   const head = new THREE.Group(); head.rotation.order = 'YXZ'; head.scale.setScalar(1.07); neck.add(head);
-  const skull = blob(head, fur, 0.275, 0.232, 0.24, 0, 0.07, 0.06);     // crâne
+  // Le masque crème est peint dans une texture (contour net et lisse) : tout le bas
+  // du visage, et une liste qui remonte en pointe entre les yeux.
+  const maskCv = document.createElement('canvas'); maskCv.width = 1024; maskCv.height = 512;
+  {
+    const ctx = maskCv.getContext('2d'), img = ctx.createImageData(1024, 512), d = img.data;
+    const c0 = [11, 11, 13], c1 = [(CREAM >> 16) & 255, (CREAM >> 8) & 255, CREAM & 255];
+    for (let py = 0; py < 512; py++) for (let px = 0; px < 1024; px++) {
+      const phi = px / 1024 * TAU, th = py / 512 * PI;              // même paramétrage que la sphère de Three.js
+      const x = -Math.cos(phi) * Math.sin(th), y = Math.cos(th), z = Math.sin(phi) * Math.sin(th);
+      const edge = -0.5 + 1.05 * Math.exp(-Math.pow(x / 0.2, 2));
+      const w = smooth(0.02, -0.02, y - edge) * smooth(0.0, 0.14, z), o = (py * 1024 + px) * 4;
+      for (let c = 0; c < 3; c++) d[o + c] = c0[c] + (c1[c] - c0[c]) * w;
+      d[o + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+  }
+  const maskTex = new THREE.CanvasTexture(maskCv); maskTex.colorSpace = THREE.SRGBColorSpace; maskTex.anisotropy = 8;
+  const faceMat = new THREE.MeshPhysicalMaterial({ map: maskTex, roughness: 0.84, sheen: 0.8, sheenRoughness: 0.5, sheenColor: new THREE.Color(0xa8a8b0) });
+  const skull = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 48), faceMat); skull.scale.set(0.275, 0.232, 0.24); skull.position.set(0, 0.07, 0.06); skull.castShadow = true; head.add(skull);     // crâne
 
   // La tache blanche du museau : un seul galet lisse, posé à fleur de visage.
   blob(head, white, 0.105, 0.066, 0.05, 0, -0.045, 0.248, false);
   const nose = blob(head, noseMat, 0.021, 0.014, 0.012, 0, -0.012, 0.298, false);
+  const tongue = blob(head, tongueMat, 0.02, 0.008, 0.03, 0, -0.085, 0.27, false); tongue.visible = false;   // petit bout de langue des moments facétieux
   const mouth = blob(head, black, 0.016, 0.004, 0.02, 0, -0.07, 0.285, false);
 
   // Yeux : très grands, presque tout en iris, avec pupille ronde et deux reflets.
   // C'est le regard qui rend le personnage attachant : on le soigne.
-  const irisMat = new THREE.MeshStandardMaterial({ color: 0x7d9a3e, roughness: 0.25 });
-  const hazelMat = new THREE.MeshStandardMaterial({ color: 0xb98f3a, roughness: 0.3 });
-  const rimMat = new THREE.MeshBasicMaterial({ color: 0x34421c });
+  const irisMat = new THREE.MeshStandardMaterial({ color: 0xa8cc2a, roughness: 0.25 });
+  const hazelMat = new THREE.MeshStandardMaterial({ color: 0xcfe85a, roughness: 0.3 });
+  const rimMat = new THREE.MeshBasicMaterial({ color: 0x3f5210 });
   const eyes = [];
   for (const s of [1, -1]) {
     const eye = new THREE.Group(); eye.position.set(s * 0.118, 0.058, 0.243); eye.rotation.y = s * 0.42;
-    blob(eye, eyeMat, 0.084, 0.09, 0.03, 0, 0, 0, false);
+    blob(eye, eyeMat, 0.084, 0.09, 0.024, 0, 0, 0, false);   // fond de l'œil, du même vert que l'iris : jamais d'aplat blanc
     const look = new THREE.Group(); eye.add(look);                      // tout ce qui bouge avec le regard
     blob(look, rimMat, 0.075, 0.081, 0.018, 0, 0, 0.016, false);        // cerne sombre de l'iris
     blob(look, irisMat, 0.068, 0.074, 0.018, 0, 0, 0.019, false);
-    blob(look, hazelMat, 0.057, 0.064, 0.014, 0, 0, 0.024, false);       // couronne ambrée autour de la pupille : le « noisette »
+    blob(look, hazelMat, 0.057, 0.064, 0.014, 0, 0, 0.024, false);       // halo plus clair autour de la pupille
     const pupil = blob(look, black, 0.046, 0.053, 0.01, 0, 0, 0.03, false);
     blob(look, glintMat, 0.02, 0.02, 0.006, 0.024, 0.032, 0.038, false);
     blob(look, glintMat, 0.009, 0.009, 0.004, -0.022, -0.026, 0.038, false);
@@ -698,16 +724,18 @@ function createKitten() {
   const _c = new THREE.Vector3(), _q = new THREE.Vector3();
   const LR = 11, LS = 12;            // anneaux par patte, sommets par anneau
   const limbSkins = [];
-  function makeLimbSkin() {
-    const geo = new THREE.BufferGeometry(), pos = new Float32Array(LR * LS * 3), nor = new Float32Array(LR * LS * 3), idx = [];
+  function makeLimbSkin(front) {
+    const geo = new THREE.BufferGeometry(), col = new Float32Array(LR * LS * 3), pos = new Float32Array(LR * LS * 3), nor = new Float32Array(LR * LS * 3), idx = [];
     for (let r = 0; r < LR - 1; r++) for (let j = 0; j < LS; j++) {
       const a = r * LS + j, b = r * LS + (j + 1) % LS;
       idx.push(a, b, a + LS, b, b + LS, a + LS);
     }
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+    for (let r = 0; r < LR; r++) for (let j = 0; j < LS; j++) paint(col, r * LS + j, smooth(front ? 0.5 : 0.68, front ? 0.62 : 0.8, r / (LR - 1)));   // chaussettes crème
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
     geo.setIndex(idx);
-    const mesh = new THREE.Mesh(geo, fur); mesh.castShadow = true; mesh.frustumCulled = false;
+    const mesh = new THREE.Mesh(geo, coat); mesh.castShadow = true; mesh.frustumCulled = false;
     limbSkins.push(mesh);
     return { geo, pos, nor };
   }
@@ -730,7 +758,7 @@ function createKitten() {
         // Galbe : cuisse ronde à l'arrière, épaule plus fine à l'avant, cheville étroite.
         // L'attache se referme en dôme : aucun bord ne dépasse du tronc.
         const dome = Math.sqrt(1 - Math.pow(1 - Math.min(1, k / 0.22), 2));
-        const rad = (lerp(L.front ? 0.068 : 0.088, 0.047, Math.pow(k, L.front ? 0.75 : 0.7)) + 0.004 * Math.sin(k * PI)) * dome + 0.0005;
+        const rad = (lerp(L.front ? 0.078 : 0.092, 0.06, Math.pow(k, L.front ? 0.75 : 0.7)) + 0.004 * Math.sin(k * PI)) * dome + 0.0005;
         for (let j = 0; j < LS; j++) {
           const an = j / LS * TAU, cs = Math.cos(an), sn = Math.sin(an), o = (r * LS + j) * 3;
           const nx = cs * _q.x + sn * _N.x, ny = cs * _q.y + sn * _N.y, nz = cs * _q.z + sn * _N.z;
@@ -748,9 +776,9 @@ function createKitten() {
     const leg = new THREE.Group(); leg.position.set(x, -0.045, z - parentG.position.z);
     const knee = new THREE.Group(); knee.position.y = -L1;
     leg.add(knee);
-    const paw = blob(knee, fur, 0.08, 0.054, 0.098, 0, -L2 + 0.006, 0.032);   // grosse patte ronde de chaton
+    const paw = blob(knee, white, 0.086, 0.058, 0.102, 0, -L2 + 0.008, 0.03);   // grosse patte ronde de chaton
     parentG.add(leg);
-    legs.push({ leg, knee, paw, front, parentG, pivot: leg.position.clone(), restX: x * 0.85, restZ: z, u: 0, lift: 0, skin: makeLimbSkin() });
+    legs.push({ leg, knee, paw, front, parentG, pivot: leg.position.clone(), restX: x * 0.85, restZ: z, u: 0, lift: 0, skin: makeLimbSkin(front) });
   });
   /** Cinématique inverse à deux os : plie la patte pour que son extrémité
       atteigne la cible (tx, ty, tz), exprimée dans le repère de son demi-tronc. */
@@ -786,7 +814,7 @@ function createKitten() {
   const TAIL = 18, RAD = 12, CAP = 4, RINGS = TAIL + CAP;
   for (let i = 0; i < TAIL; i++) {
     const joint = new THREE.Group();
-    joint.position.set(0, i ? 0.033 : 0.09, i ? 0 : -0.26);
+    joint.position.set(0, i ? 0.033 : 0.045, i ? 0 : -0.2);   // la racine part de l'intérieur du corps : jamais de vide
     parent.add(joint); tail.push({ joint, r: 0.038 + 0.018 * Math.sin(Math.pow(i / (TAIL - 1), 0.8) * PI) }); parent = joint;   // renflée au milieu, effilée au bout parent = joint;
   }
   const tailGeo = new THREE.BufferGeometry();
@@ -804,7 +832,7 @@ function createKitten() {
      Une courbe passe par l'arrière-train, le bassin et l'avant-train ; on
      tend autour d'elle des anneaux ovales qui se referment en dôme aux deux
      bouts. Le corps reste d'un seul tenant même quand l'échine ondule. */
-  const BR = 26, BS = 28;
+  const BR = 34, BS = 44;
   const bodyPts = [0, 1, 2, 3, 4].map(() => new THREE.Vector3());
   const bodyCurve = new THREE.CatmullRomCurve3(bodyPts, false, 'centripetal');
   const bodyGeo = new THREE.BufferGeometry(), bodyPos = new Float32Array(BR * BS * 3), bodyIdx = [];
@@ -813,8 +841,15 @@ function createKitten() {
     bodyIdx.push(a, b, a + BS, b, b + BS, a + BS);
   }
   bodyGeo.setAttribute('position', new THREE.BufferAttribute(bodyPos, 3));
+  const bodyCol = new Float32Array(BR * BS * 3);
+  for (let r = 0; r < BR; r++) for (let j = 0; j < BS; j++) {
+    // Plastron crème sur le poitrail, qui se prolonge en une bande sous le ventre.
+    const k = r / (BR - 1), up = Math.sin(j / BS * TAU), edge = lerp(-0.78, 0.55, smooth(0.5, 0.92, k)) - 0.5 * smooth(0.3, 0.1, k);
+    paint(bodyCol, r * BS + j, smooth(0.1, -0.1, up - edge));
+  }
+  bodyGeo.setAttribute('color', new THREE.BufferAttribute(bodyCol, 3));
   bodyGeo.setIndex(bodyIdx);
-  const bodyMesh = new THREE.Mesh(bodyGeo, fur); bodyMesh.castShadow = true; bodyMesh.frustumCulled = false;
+  const bodyMesh = new THREE.Mesh(bodyGeo, coat); bodyMesh.castShadow = true; bodyMesh.frustumCulled = false;
   const _bp = new THREE.Vector3(), _bt = new THREE.Vector3(), _bs = new THREE.Vector3(), _bn = new THREE.Vector3(), _bu = new THREE.Vector3();
   function skinBody() {
     bodyPts[0].set(0, 0.0, -0.3).applyMatrix4(rumpG.matrixWorld);
@@ -874,7 +909,7 @@ function createKitten() {
     tailUp: 0.4, tailWag: 0.3, tailWrap: 0, tailFluff: 0,
     paw: 0, wiggle: 0, run: 0,
     lookYaw: 0, lookPitch: 0,          // petits coups d'œil spontanés, ajoutés au regard dirigé
-    brow: 0, lidTop: 0, smile: 0.35,   // expression : inclinaison des paupières (+ malicieux, - inquiet), paupière mi-close, sourire
+    brow: 0, lidTop: 0, smile: 0.35, tongue: 0,   // expression : inclinaison des paupières (+ malicieux, - inquiet), paupière mi-close, sourire
   };
   const K = {
     root, hips, head, nose, x: 0, prevX: 0, prevZ: 0, phase: 0, move: 0, speed: 0, vs: 0, avoid: 0, steer: 0,
@@ -1057,11 +1092,12 @@ function createKitten() {
       e.eye.scale.y = open;
       e.eye.rotation.z = -e.side * (0.5 * (1 - open) + 0.1 * p.brow);   // paupière close : un petit arc paisible
       e.lid.visible = false;
-      e.pupil.scale.set(0.042 * Math.min(p.pupil, 1.25), 0.049 * Math.min(p.pupil, 1.25), 0.01);
+      // Pupille ronde et immense quand il est attendri ou joueur, fendue quand il a peur ou se concentre.
+      e.pupil.scale.set(0.042 * (p.pupil < 1 ? Math.pow(Math.max(p.pupil, 0.3), 2.4) : Math.min(p.pupil, 1.25)), 0.049 * clamp(p.pupil, 0.85, 1.25), 0.01);
       e.look.position.x = clamp(gx * 0.02 - e.side * p.cross * 0.026, -0.024, 0.024);
       e.look.position.y = clamp(gy * 0.018, -0.02, 0.02);
     }
-    eyeMat.emissiveIntensity = 0.12 + 0.6 * smooth(0.6, 1, world.tod);   // les yeux luisent la nuit
+    eyeMat.emissiveIntensity = 0.1 + 0.45 * smooth(0.6, 1, world.tod);   // les yeux luisent la nuit
 
     /* Oreilles : se couchent sous l'émotion, tressaillent de temps en temps. */
     // Inertie : les oreilles traînent derrière les mouvements de la tête et du corps.
@@ -1074,6 +1110,7 @@ function createKitten() {
       const f = Math.sin(e.flick * PI * 2) * e.flick * 0.35;
       e.ear.rotation.set(-0.75 * p.earBack - Math.sin(ph * 2 - 1.6) * 0.1 * K.move + K.earLag, 0, -e.side * (0.3 + 0.4 * p.earBack + f));   // elles rebondissent à contretemps
     }
+    tongue.visible = p.tongue > 0.05; tongue.position.set(0, -0.072 - 0.012 * p.tongue, 0.268 + 0.022 * p.tongue); tongue.rotation.x = 0.6 * p.tongue;
     mouth.visible = p.mouth > 0.06;                            // pas de trait de bouche au repos : seulement quand il miaule ou bâille
     mouth.scale.set(0.016 + 0.008 * p.mouth, 0.004 + 0.034 * p.mouth, 0.02);
 
@@ -1369,14 +1406,24 @@ const F = (() => {
 })();
 
 /* --- Une étoile filante, pour le plaisir ------------------------------------------ */
-const shooting = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: softDot, color: 0xffffff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-shooting.scale.set(11, 0.22, 1); shooting.rotation.z = 0.42; shooting.userData.k = 1; shooting.frustumCulled = false;
+const shooting = new THREE.Group(); shooting.userData.k = 1;
+{
+  const mk = (o, c) => new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: softDot, color: c, transparent: true, opacity: o, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+  const trail = mk(0.8, 0xdfe6ff); trail.scale.set(20, 1.1, 1); trail.position.x = 9;      // la traînée, derrière la tête
+  const core = mk(1, 0xffffff); core.scale.set(9, 0.45, 1); core.position.x = 4;
+  const headGlow = mk(1, 0xffffff); headGlow.scale.set(3.2, 3.2, 1);
+  shooting.add(trail, core, headGlow); shooting.rotation.z = 0.36; shooting.visible = false;
+  shooting.traverse(o => { o.frustumCulled = false; o.renderOrder = 2; });
+}
 scene.add(shooting);
 function updateShooting(dt) {
-  const u = shooting.userData; if (u.k >= 1) { shooting.material.opacity = 0; return; }
-  u.k = Math.min(1, u.k + dt / 0.9);
-  shooting.position.set(camera.position.x + lerp(-4, -28, u.k), camTarget.y + lerp(27, 17, u.k), -108);
-  shooting.material.opacity = Math.sin(u.k * PI) * 0.9;
+  const u = shooting.userData; if (u.k >= 1) { shooting.visible = false; return; }
+  u.k = Math.min(1, u.k + dt / 1.5);
+  shooting.visible = true;
+  // Elle traverse le ciel de droite à gauche en descendant, bien dans le cadre.
+  shooting.position.set(camera.position.x + lerp(16, -26, easeOut(u.k) * 0.5 + u.k * 0.5), camTarget.y + lerp(25, 11, u.k), -100);
+  const a = Math.sin(Math.min(1, u.k * 1.15) * PI);
+  shooting.children.forEach(m => { m.material.opacity = a; });
 }
 
 function updateProps(dt, t) { B.update(dt, t); V.update(dt, t); Y.update(dt, t); F.update(dt, t); updateShooting(dt); updateEmotes(dt, t); }
@@ -1680,7 +1727,8 @@ function* sceneWake() {
   K.neutral({ yaw: PI / 2 }); yield* wait(0.6);
   yield* wait(0.55, k => K.snap({ roll: Math.sin(k * PI * 6) * 0.17 * (1 - k) }));   // il s'ébroue
   K.snap({ roll: 0 });
-  K.set({ headYaw: -1.0, headRoll: 0.2 }); yield* wait(0.7);  // bonjour, vous
+  K.set({ headYaw: -1.0, headRoll: 0.28, tongue: 1, pupil: 1.25 }); yield* wait(0.9);  // bonjour, vous (un bout de langue oublié dehors)
+  K.set({ tongue: 0 });
   yield* meow(1); yield* wait(0.8);
   K.set({ headYaw: 0, headRoll: 0 });
 }
@@ -1711,11 +1759,11 @@ function* sceneButterfly() {
 
   // À l'affût : il se tapit, l'arrière-train se dandine...
   shot({ dist: 4.6, height: 0.3, az: 0.32, ahead: 0.9, lift: 0.6 }, 1.2);
-  K.set({ crouch: 1, pupil: 1.45, earBack: 0.3, tailUp: -0.2, tailWag: 1, brow: 0.9, smile: 0.9 }); yield* wait(0.6);
+  K.set({ crouch: 1, pupil: 1.45, earBack: 0.3, tailUp: -0.2, tailWag: 1, brow: 0.9, smile: 0.9, tongue: 1 }); yield* wait(0.6);   // langue tirée : il s'applique
   K.set({ wiggle: 1 }); sfx.wiggle(); yield* wait(1.35);
   K.set({ wiggle: 0 }); yield* wait(0.25);
   // ... et bondit !
-  sfx.whoosh(); K.set({ crouch: 0, stretch: 0.5, earBack: 0.8 });
+  sfx.whoosh(); K.set({ crouch: 0, stretch: 0.5, earBack: 0.8, tongue: 0 });
   yield* hop(1.6, 0.62, 0.5, k => { if (k > 0.3) { B.flutter = 1; B.aim = v => v.set(K.x + 1.2, gy(K.x) + 1.9, -0.6); } });
   // Raté. Atterrissage sur le museau, puis culbute.
   sfx.thud(); sfx.boing(); puff(K.x + 0.3); world.shake = 0.03;
@@ -1768,13 +1816,13 @@ function* sceneVase() {
   // Regard caméra. Long. Très long.
   K.lookTarget = null; K.set({ headYaw: -1.15, headPitch: 0, pupil: 1, brow: 0.9, lidTop: 0.3, smile: 1 }); yield* wait(1.6);
   // Et, sans nous quitter des yeux, il pousse.
-  K.set({ paw: 1 }); yield* wait(0.35); sfx.scrape(0.9);
+  K.set({ paw: 1, tongue: 1, headRoll: 0.22 }); yield* wait(0.35); sfx.scrape(0.9);
   yield* wait(0.9, k => { V.slide = easeInOut(k) * 0.17; touch.x = X_VASE - 0.15 + V.slide; });
   V.fall(); K.set({ paw: 0 });
   yield* until(() => V.broken, 3);
   K.reach = null; sfx.crash(); world.shake = 0.06; puff(V.debris.x, 0.1, 6);
   // Sursaut : oreilles couchées, queue en écouvillon.
-  K.rate = 20; K.set({ earBack: 1, pupil: 0.6, tailFluff: 1, tailUp: 1, headYaw: -0.2, brow: -1, lidTop: 0, smile: 0 });
+  K.rate = 20; K.set({ tongue: 0, headRoll: 0, earBack: 1, pupil: 0.6, tailFluff: 1, tailUp: 1, headYaw: -0.2, brow: -1, lidTop: 0, smile: 0 });
   emote('bang', ...overHead(0.1));
   yield* hop(-0.3, 0.34, 0.34, null, 0);
   K.rate = 7; yield* wait(0.8);
@@ -1964,7 +2012,7 @@ renderer.setAnimationLoop(() => {
 
 /* Petit accès de mise au point (console) : avancer le temps sans attendre. */
 document.getElementById('error').style.display = 'none';
-window.__debug = { manual: false, togglePause, get paused() { return paused; }, get time() { return time; }, step, start, audio, music, world, cam, camGoal, K, camera, render: () => renderer.render(scene, camera) };
+window.__debug = { manual: false, togglePause, get paused() { return paused; }, get time() { return time; }, step, start, audio, music, world, cam, camGoal, K, camera, shooting, render: () => renderer.render(scene, camera) };
 </script>
 <script>
   /* Si le module n'a pas pu se charger (pas de réseau), on l'explique. */
