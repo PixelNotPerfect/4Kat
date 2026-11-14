@@ -613,12 +613,12 @@ function createKitten() {
   /* --- Matières --- */
   // Pelage noir : le « sheen » dépose un liseré velouté sur les contours.
   const fur = new THREE.MeshPhysicalMaterial({ color: 0x0b0b0d, roughness: 0.82, sheen: 1, sheenRoughness: 0.5, sheenColor: new THREE.Color(0xb4b4bc) });
-  const earInner = new THREE.MeshStandardMaterial({ color: 0x34343a, roughness: 0.85 });
+  const earInner = new THREE.MeshStandardMaterial({ color: 0xd98f93, roughness: 0.85 });   // intérieur des oreilles : rose doux
   const white = new THREE.MeshStandardMaterial({ color: 0xf7f7f4, roughness: 0.7 });
   const eyeMat = new THREE.MeshStandardMaterial({ color: 0xfbfbf8, roughness: 0.2, emissive: 0xffffff, emissiveIntensity: 0.12 });
   const black = new THREE.MeshBasicMaterial({ color: 0x000000 });
   const glintMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-  const noseMat = new THREE.MeshStandardMaterial({ color: 0x060606, roughness: 0.25 });
+  const noseMat = new THREE.MeshStandardMaterial({ color: 0xe79a9a, roughness: 0.4 });   // truffe rose
 
   const unit = new THREE.SphereGeometry(1, 40, 28);
   /** Ajoute une sphère étirée (ellipsoïde) à `parent`. */
@@ -643,20 +643,19 @@ function createKitten() {
   const chest = blob(chestG, fur, 0.192, 0.19, 0.19, 0, 0.012, 0.11);    // poitrail
   blob(chestG, fur, 0.14, 0.14, 0.13, 0, 0.1, 0.17);                      // encolure : relie la tête au corps d'une seule courbe
   const rump = blob(rumpG, fur, 0.195, 0.188, 0.19, 0, 0, -0.1);         // croupe
+  // Ces volumes ne sont plus affichés : ils servent de gabarit (collision avec le sol).
+  // Ce qu'on voit, c'est une peau unique tendue d'un bout à l'autre du tronc (skinBody).
+  for (const m of [...hips.children, ...chestG.children, ...rumpG.children]) if (m.isMesh) m.visible = false;
 
   /* --- Tête : grosse et ronde, comme chez tous les chatons --- */
   const neck = new THREE.Group(); neck.position.set(0, 0.17, 0.23); chestG.add(neck);
   const head = new THREE.Group(); head.rotation.order = 'YXZ'; head.scale.setScalar(1.07); neck.add(head);
-  const skull = blob(head, fur, 0.255, 0.235, 0.228, 0, 0.075, 0.06);     // crâne
-  blob(head, fur, 0.1, 0.09, 0.1, 0.14, -0.01, 0.1);     // joues rebondies
-  blob(head, fur, 0.1, 0.09, 0.1, -0.14, -0.01, 0.1);
+  const skull = blob(head, fur, 0.275, 0.232, 0.24, 0, 0.07, 0.06);     // crâne
 
-  // La tache blanche du museau : deux babines, un menton.
-  blob(head, white, 0.062, 0.05, 0.05, 0.038, -0.035, 0.262, false);
-  blob(head, white, 0.062, 0.05, 0.05, -0.038, -0.035, 0.262, false);
-  blob(head, white, 0.045, 0.036, 0.04, 0, -0.072, 0.25, false);
-  const nose = blob(head, noseMat, 0.023, 0.015, 0.014, 0, -0.01, 0.314, false);
-  const mouth = blob(head, black, 0.016, 0.004, 0.02, 0, -0.07, 0.297, false);
+  // La tache blanche du museau : un seul galet lisse, posé à fleur de visage.
+  blob(head, white, 0.105, 0.066, 0.05, 0, -0.045, 0.248, false);
+  const nose = blob(head, noseMat, 0.021, 0.014, 0.012, 0, -0.012, 0.298, false);
+  const mouth = blob(head, black, 0.016, 0.004, 0.02, 0, -0.07, 0.285, false);
 
   // Yeux : très grands, presque tout en iris, avec pupille ronde et deux reflets.
   // C'est le regard qui rend le personnage attachant : on le soigne.
@@ -665,12 +664,12 @@ function createKitten() {
   const rimMat = new THREE.MeshBasicMaterial({ color: 0x34421c });
   const eyes = [];
   for (const s of [1, -1]) {
-    const eye = new THREE.Group(); eye.position.set(s * 0.115, 0.058, 0.222); eye.rotation.y = s * 0.42;
+    const eye = new THREE.Group(); eye.position.set(s * 0.118, 0.058, 0.243); eye.rotation.y = s * 0.42;
     blob(eye, eyeMat, 0.084, 0.09, 0.03, 0, 0, 0, false);
     const look = new THREE.Group(); eye.add(look);                      // tout ce qui bouge avec le regard
     blob(look, rimMat, 0.075, 0.081, 0.018, 0, 0, 0.016, false);        // cerne sombre de l'iris
     blob(look, irisMat, 0.068, 0.074, 0.018, 0, 0, 0.019, false);
-    blob(look, hazelMat, 0.051, 0.057, 0.014, 0, 0, 0.024, false);       // couronne ambrée autour de la pupille : le « noisette »
+    blob(look, hazelMat, 0.057, 0.064, 0.014, 0, 0, 0.024, false);       // couronne ambrée autour de la pupille : le « noisette »
     const pupil = blob(look, black, 0.046, 0.053, 0.01, 0, 0, 0.03, false);
     blob(look, glintMat, 0.02, 0.02, 0.006, 0.024, 0.032, 0.038, false);
     blob(look, glintMat, 0.009, 0.009, 0.004, -0.022, -0.026, 0.038, false);
@@ -801,10 +800,47 @@ function createKitten() {
   tailGeo.setIndex(tailIdx);
   const tailMesh = new THREE.Mesh(tailGeo, fur);
   tailMesh.castShadow = true; tailMesh.frustumCulled = false;
-  root.userData.skins = [tailMesh, ...limbSkins];     // ajoutés à la scène : leurs sommets sont en coordonnées monde
+  /* --- Peau du tronc : une seule surface lisse, de la croupe au poitrail ---
+     Une courbe passe par l'arrière-train, le bassin et l'avant-train ; on
+     tend autour d'elle des anneaux ovales qui se referment en dôme aux deux
+     bouts. Le corps reste d'un seul tenant même quand l'échine ondule. */
+  const BR = 26, BS = 28;
+  const bodyPts = [0, 1, 2, 3, 4].map(() => new THREE.Vector3());
+  const bodyCurve = new THREE.CatmullRomCurve3(bodyPts, false, 'centripetal');
+  const bodyGeo = new THREE.BufferGeometry(), bodyPos = new Float32Array(BR * BS * 3), bodyIdx = [];
+  for (let r = 0; r < BR - 1; r++) for (let j = 0; j < BS; j++) {
+    const a = r * BS + j, b = r * BS + (j + 1) % BS;
+    bodyIdx.push(a, b, a + BS, b, b + BS, a + BS);
+  }
+  bodyGeo.setAttribute('position', new THREE.BufferAttribute(bodyPos, 3));
+  bodyGeo.setIndex(bodyIdx);
+  const bodyMesh = new THREE.Mesh(bodyGeo, fur); bodyMesh.castShadow = true; bodyMesh.frustumCulled = false;
+  const _bp = new THREE.Vector3(), _bt = new THREE.Vector3(), _bs = new THREE.Vector3(), _bn = new THREE.Vector3(), _bu = new THREE.Vector3();
+  function skinBody() {
+    bodyPts[0].set(0, 0.0, -0.3).applyMatrix4(rumpG.matrixWorld);
+    bodyPts[1].set(0, 0.0, -0.13).applyMatrix4(rumpG.matrixWorld);
+    bodyPts[2].set(0, -0.005, 0).applyMatrix4(hips.matrixWorld);
+    bodyPts[3].set(0, 0.02, 0.13).applyMatrix4(chestG.matrixWorld);
+    bodyPts[4].set(0, 0.07, 0.31).applyMatrix4(chestG.matrixWorld);
+    _bs.setFromMatrixColumn(hips.matrixWorld, 0).normalize();
+    const wide = 0.205 * hips.scale.x * body.scale.x / 0.2, tall = 0.195 * hips.scale.y * body.scale.y / 0.195;
+    for (let r = 0; r < BR; r++) {
+      const k = r / (BR - 1);
+      bodyCurve.getPoint(k, _bp); bodyCurve.getTangent(clamp(k, 0.001, 0.999), _bt);
+      _bn.crossVectors(_bt, _bs).normalize(); _bu.crossVectors(_bn, _bt).normalize();
+      // Profil : dômes aux deux bouts, ventre plein, poitrail un peu plus fin que la croupe.
+      const prof = Math.pow(Math.sin(PI * clamp(k, 0, 1)), 0.5) * lerp(1.0, 0.9, k);
+      for (let j = 0; j < BS; j++) {
+        const an = j / BS * TAU, o = (r * BS + j) * 3, cx = Math.cos(an) * wide * prof, cy = Math.sin(an) * tall * prof;
+        bodyPos[o] = _bp.x + _bu.x * cx + _bn.x * cy; bodyPos[o + 1] = _bp.y + _bu.y * cx + _bn.y * cy; bodyPos[o + 2] = _bp.z + _bu.z * cx + _bn.z * cy;
+      }
+    }
+    bodyGeo.attributes.position.needsUpdate = true; bodyGeo.computeVertexNormals();
+  }
+  root.userData.skins = [tailMesh, bodyMesh, ...limbSkins];     // ajoutés à la scène : leurs sommets sont en coordonnées monde
   function skinTail(fluff) {
     root.updateMatrixWorld(true);
-    skinLegs();
+    skinLegs(); skinBody();
     for (let r = 0; r < RINGS; r++) {
       const i = Math.min(r, TAIL - 1), m = tail[i].joint.matrixWorld;
       const th = r < TAIL ? 0 : (r - TAIL + 1) / CAP * PI / 2;      // anneaux du bout : une demi-sphère
@@ -1021,7 +1057,7 @@ function createKitten() {
       e.eye.scale.y = open;
       e.eye.rotation.z = -e.side * (0.5 * (1 - open) + 0.1 * p.brow);   // paupière close : un petit arc paisible
       e.lid.visible = false;
-      e.pupil.scale.set(0.034 * Math.min(p.pupil, 1.3), 0.04 * Math.min(p.pupil, 1.3), 0.01);
+      e.pupil.scale.set(0.042 * Math.min(p.pupil, 1.25), 0.049 * Math.min(p.pupil, 1.25), 0.01);
       e.look.position.x = clamp(gx * 0.02 - e.side * p.cross * 0.026, -0.024, 0.024);
       e.look.position.y = clamp(gy * 0.018, -0.02, 0.02);
     }
