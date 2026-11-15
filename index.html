@@ -808,7 +808,8 @@ function createKitten() {
     const alpha = Math.acos(clamp((L1 * L1 + D * D - L2 * L2) / (2 * L1 * D), -1, 1));
     const gamma = Math.acos(clamp((L1 * L1 + L2 * L2 - D * D) / (2 * L1 * L2), -1, 1));
     const s = L.front ? 1 : -1;                    // le coude pointe vers l'arrière, le genou vers l'avant
-    L.leg.rotation.set(Math.atan2(-dz, down) + s * alpha, 0, Math.atan2(dx, -dy));
+    // Tangage dans le plan avant-arrière (valable aussi quand la cible est plus haute que l'épaule), puis léger écart latéral.
+    L.leg.rotation.set(Math.atan2(-dz, -dy) + s * alpha, 0, Math.asin(clamp(dx / Math.max(D, 1e-4), -1, 1)));
     L.knee.rotation.x = -s * (PI - gamma);
   }
   /** Trajectoire d'un pied sur un cycle : appui (il recule sous le corps), puis
@@ -1085,7 +1086,15 @@ function createKitten() {
       _pv.copy(L.pivot).applyMatrix4(M);                       // épaule ou hanche, dans ce même repère
       if (flying > 0) _t.lerp(_a.set(_pv.x, _pv.y - 0.1, _pv.z + (front ? 0.27 : -0.28)), flying);   // en plein saut : pattes en extension
       if (i === 0 && p.paw > 0) {                               // patte tendue : vers l'objet visé, s'il y en a un
-        if (K.reach) yawG.worldToLocal(_a.copy(K.reach)); else _a.set(_pv.x * 0.6, _pv.y + 0.08, _pv.z + 0.3);
+        if (K.reach) {
+          // La cible est ramenée dans la zone qu'une patte atteint naturellement : devant
+          // l'épaule, jamais au-dessus d'elle ni derrière, et à portée de patte.
+          yawG.worldToLocal(_a.copy(K.reach));
+          _a.x = clamp(_a.x, _pv.x - 0.12, _pv.x + 0.06);
+          _a.y = Math.min(_a.y, _pv.y + 0.16);
+          _a.z = Math.max(_a.z, _pv.z + 0.2);
+          _a.sub(_pv).clampLength(0, L1 + L2 - 0.02).add(_pv);
+        } else _a.set(_pv.x * 0.6, _pv.y - 0.02, _pv.z + 0.3);
         _t.lerp(_a, clamp(p.paw, 0, 1.15));
       }
       _t.applyMatrix4(inv);                                    // vers le repère du demi-tronc
@@ -1766,7 +1775,7 @@ function* sceneButterfly() {
   emote('what', ...overHead()); sfx.pop(0.8);
   yield* wait(1.4);
   // Le papillon vient lui danser sous le nez.
-  B.aim = v => v.set(K.x + 0.62 + Math.sin(time * 1.7) * 0.12, gy(K.x) + 0.72 + Math.sin(time * 2.3) * 0.1, 0.22);
+  B.aim = v => v.set(K.x + 0.62 + Math.sin(time * 1.7) * 0.12, gy(K.x) + 0.6 + Math.sin(time * 2.3) * 0.07, 0.2);
   K.set({ headRoll: 0 }); yield* wait(1.7);
   // Coup de patte... dans le vide.
   K.reach = B.group.position; K.rate = 15; K.set({ paw: 1, stretch: 0.25 }); sfx.swish(); yield* wait(0.2);
